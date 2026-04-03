@@ -1,0 +1,39 @@
+@font-face {
+  font-family: 'Barbra';
+  src: url('./components/assets/Barbra-Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+:root {
+  --primary-red: #E8002D;
+  --accent-gold: #FFD700;
+  --dark-bg: #0a0e27;
+  --light-text: #ffffff;
+}
+
+body {
+  font-family: 'Titillium Web', sans-serif;
+  background-color: var(--dark-bg);
+  color: var(--light-text);
+  font-weight: 400;
+}
+
+h1, h2, h3, .display-font {
+  font-family: 'Asset', sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+h1 {
+  font-size: 3.5rem;
+  color: var(--primary-red);
+}
+
+h2 {
+  font-size: 2rem;
+  color: var(--accent-gold);
+}
+
+
