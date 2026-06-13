@@ -1,682 +1,443 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback, memo } from "react";
+import { TYRE_COMPOUNDS } from "../simulation/raceEngine";
 
-const TRACK_VIEWBOX = { width: 1000, height: 680 };
-const TOTAL_TRACK_LENGTH = 1000;
+const TRACK_VIEWBOX = { width: 1180, height: 760 };
 const SECTOR_BREAKPOINTS = [
-  { key: "S1", start: 0, end: 0.34, color: "rgba(225,6,0,0.72)" },
-  { key: "S2", start: 0.34, end: 0.67, color: "rgba(255,196,87,0.6)" },
-  { key: "S3", start: 0.67, end: 1, color: "rgba(115,201,255,0.62)" },
+  { key: "S1", start: 0,    end: 0.33, color: "rgba(225,6,0,0.82)" },
+  { key: "S2", start: 0.33, end: 0.66, color: "rgba(255,194,78,0.72)" },
+  { key: "S3", start: 0.66, end: 1,    color: "rgba(112,187,255,0.72)" },
 ];
-const DRIVER_COLORS = [
-  "#E10600",
-  "#27F4D2",
-  "#FF8700",
-  "#3671C6",
-  "#52E252",
-  "#FF87BC",
-];
-const BADGE_EVENT_TYPES = new Set(["pit_stop", "undercut", "overcut"]);
-const EVENT_BADGE_META = {
-  pit_stop: { label: "PIT", color: "#f4c542" },
-  undercut: { label: "UNDERCUT", color: "#47d17a" },
-  overcut: { label: "OVERCUT", color: "#59a8ff" },
-  pit_request: { label: "PIT IN", color: "#ff8a3d" },
-};
-const EVENT_BADGE_TTL_MS = 1500;
-const WEATHER_ALERT_TTL_MS = 1800;
-const RECENT_EVENT_LAPS = 3;
-const FEED_VISIBLE_LAPS = 4;
+const DRIVER_COLORS = ["#E10600", "#27F4D2", "#FF8700", "#3671C6", "#52E252", "#FF87BC"];
 
 const SPA_TRACK_PATH = `
-  M 116 600
-  C 66 650, 40 640, 52 566
-  C 66 488, 102 406, 152 318
-  C 194 245, 228 192, 256 152
-  C 282 116, 312 104, 340 92
-  C 364 82, 380 58, 392 30
-  C 404 4, 432 0, 456 22
-  C 482 46, 494 90, 524 130
-  C 566 184, 648 142, 740 82
-  C 816 34, 892 16, 932 42
-  C 966 64, 974 112, 950 142
-  C 924 174, 866 150, 824 114
-  C 798 92, 760 96, 736 122
-  C 708 152, 712 198, 748 214
-  C 790 234, 842 216, 868 248
-  C 896 282, 888 326, 854 346
-  C 814 368, 732 348, 664 360
-  C 602 370, 578 416, 590 474
-  C 602 530, 662 548, 738 550
-  C 820 552, 910 556, 938 590
-  C 966 624, 954 660, 914 664
-  C 854 672, 778 666, 716 642
-  C 654 618, 628 562, 578 530
-  C 518 494, 430 500, 372 536
-  C 324 566, 270 582, 220 596
-  C 196 604, 192 576, 196 548
-  C 202 516, 214 498, 204 484
-  C 188 460, 164 512, 116 600
+  M 170 628
+  C 148 662, 118 676, 110 644
+  C 100 608, 118 544, 152 486
+  C 188 424, 222 358, 252 298
+  C 274 254, 290 230, 320 208
+  C 344 190, 362 182, 378 166
+  C 394 150, 410 124, 430 96
+  C 448 70, 472 62, 496 80
+  C 516 94, 532 122, 556 132
+  C 594 150, 640 120, 690 84
+  C 760 34, 834 22, 880 52
+  C 914 76, 930 100, 948 118
+  C 972 144, 978 172, 956 192
+  C 930 216, 900 198, 872 176
+  C 838 148, 804 142, 776 170
+  C 744 202, 708 228, 660 248
+  C 622 266, 592 286, 584 320
+  C 576 356, 588 396, 620 414
+  C 654 434, 702 430, 754 428
+  C 808 428, 858 432, 898 456
+  C 934 478, 952 504, 950 538
+  C 946 580, 926 624, 890 636
+  C 844 650, 788 640, 742 624
+  C 698 608, 666 574, 626 546
+  C 586 520, 536 514, 488 524
+  C 434 536, 388 562, 336 586
+  C 286 608, 250 620, 220 626
+  C 194 632, 182 614, 186 590
+  C 194 560, 208 530, 196 518
+  C 186 508, 176 524, 170 628
 `;
 
+const TURN_MARKERS = [
+  { label: "La Source",      x: 140, y: 646 },
+  { label: "Eau Rouge",      x: 220, y: 470 },
+  { label: "Raidillon",      x: 276, y: 392 },
+  { label: "Kemmel",         x: 346, y: 308 },
+  { label: "Les Combes",     x: 644, y: 112 },
+  { label: "Bruxelles",      x: 806, y: 272 },
+  { label: "Double Gauche",  x: 676, y: 352 },
+  { label: "Les Fagnes",     x: 888, y: 470 },
+  { label: "Blanchimont",    x: 548, y: 520 },
+  { label: "Bus Stop",       x: 248, y: 566 },
+];
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const wrapDistance = (distance, totalLength) => {
+  if (!totalLength) return 0;
+  return ((distance % totalLength) + totalLength) % totalLength;
+};
+const shortestDistanceDelta = (from, to, totalLength) => {
+  if (!totalLength) return 0;
+  let delta = to - from;
+  if (delta > totalLength / 2) delta -= totalLength;
+  if (delta < -totalLength / 2) delta += totalLength;
+  return delta;
+};
 
 function getDriverLabel(player) {
   const [firstName, lastName] = player.name.split(" ");
-  return lastName ? `${player.position}. ${lastName}` : `${player.position}. ${firstName}`;
+  return lastName ? lastName.toUpperCase() : firstName.toUpperCase();
 }
 
-function formatEventLabel(event, playersById) {
-  if (event.type === "weather_change") {
-    return {
-      actor: "TRACK",
-      action: `${String(event.to).replace("_", " ").toUpperCase()} STARTED`,
-      emphasis: "normal",
-      arrow: null,
-    };
-  }
-
-  const player = playersById.get(event.playerId);
-  const driverName = player?.name?.split(" ").at(-1) ?? event.playerId;
-  const eventMeta = EVENT_BADGE_META[event.type];
-
-  if (event.type === "position_gain" || event.type === "position_loss") {
-    const rivalName = event.rivalPlayerId
-      ? playersById.get(event.rivalPlayerId)?.name?.split(" ").at(-1)
-      : null;
-    const gain = typeof event.previousPosition === "number" && typeof event.newPosition === "number"
-      ? event.previousPosition - event.newPosition
-      : 0;
-
-    return {
-      actor: driverName.toUpperCase(),
-      action: rivalName
-        ? `${gain > 0 ? "PASSED" : "LOST TO"} ${rivalName.toUpperCase()} (P${event.previousPosition} → P${event.newPosition})`
-        : `${gain > 0 ? "POSITION GAIN" : "POSITION LOSS"} (P${event.previousPosition} → P${event.newPosition})`,
-      emphasis: Math.abs(gain) >= 2 ? "high" : "normal",
-      arrow: gain > 0 ? "↑" : "↓",
-    };
-  }
-
-  if (!eventMeta) {
-    return null;
-  }
-
-  const rivalName = event.rivalPlayerId
-    ? playersById.get(event.rivalPlayerId)?.name?.split(" ").at(-1)
-    : null;
-  const positionDelta = typeof event.previousPosition === "number" && typeof event.newPosition === "number"
-    ? ` (P${event.previousPosition} → P${event.newPosition})`
-    : "";
-  const action = rivalName
-    ? `${eventMeta.label} ${rivalName}${positionDelta}`
-    : `${eventMeta.label}${positionDelta}`;
-  const gain = typeof event.previousPosition === "number" && typeof event.newPosition === "number"
-    ? event.previousPosition - event.newPosition
-    : 0;
-
-  return {
-    actor: driverName.toUpperCase(),
-    action,
-    emphasis: gain >= 2 || event.type === "undercut" || event.type === "overcut" ? "high" : "normal",
-    arrow: gain > 0 ? "↑" : gain < 0 ? "↓" : null,
-  };
+function deriveSpeed(lapTime) {
+  if (!Number.isFinite(lapTime) || lapTime <= 0) return null;
+  return Math.round((7.004 / lapTime) * 3600);
 }
 
-export default function TrackView({ raceState, playbackProgress = 0 }) {
+function TrackViewInner({ raceState, playbackProgress = 0 }) {
   const pathRef = useRef(null);
-  const processedEventCountRef = useRef(0);
-  const previousPositionsRef = useRef(new Map());
-  const [pathLength, setPathLength] = useState(0);
-  const [recentEvents, setRecentEvents] = useState([]);
-  const [activeBadges, setActiveBadges] = useState([]);
-  const [weatherAlert, setWeatherAlert] = useState(null);
+  const pathLenRef = useRef(0);
+  const [pathReady, setPathReady] = useState(false);
+  const smoothedRef = useRef({});
+  const carGroupRefs = useRef({});
+  const raceStateRef = useRef(raceState);
+  const progressRef = useRef(playbackProgress);
 
-  useEffect(() => {
-    if (!pathRef.current) {
-      return;
-    }
+  // Keep refs in sync — no re-renders triggered
+  raceStateRef.current = raceState;
+  progressRef.current = playbackProgress;
 
-    setPathLength(pathRef.current.getTotalLength());
+  const setCarRef = useCallback((id, el) => {
+    if (el) carGroupRefs.current[id] = el;
   }, []);
 
   useEffect(() => {
-    const incomingEvents = raceState.events.slice(processedEventCountRef.current);
+    if (!pathRef.current) return;
+    pathLenRef.current = pathRef.current.getTotalLength();
+    setPathReady(true);
+  }, []);
 
-    if (incomingEvents.length === 0) {
-      return;
-    }
+  const pathLength = pathLenRef.current;
 
-    processedEventCountRef.current = raceState.events.length;
-
-    setRecentEvents((previousEvents) => (
-      [...previousEvents, ...incomingEvents].filter((event) => (
-        raceState.currentLap - event.lap < FEED_VISIBLE_LAPS
-      ))
-    ));
-
-    const badgeEvents = incomingEvents
-      .filter((event) => BADGE_EVENT_TYPES.has(event.type) && event.playerId)
-      .map((event) => ({
-        id: `${event.type}-${event.playerId}-${event.lap}-${event.timestamp ?? raceState.currentLap}`,
-        playerId: event.playerId,
-        type: event.type,
-      }));
-
-    if (badgeEvents.length > 0) {
-      setActiveBadges((previousBadges) => [...previousBadges, ...badgeEvents]);
-      const badgeTimer = window.setTimeout(() => {
-        setActiveBadges((previousBadges) => (
-          previousBadges.filter((badge) => !badgeEvents.some((newBadge) => newBadge.id === badge.id))
-        ));
-      }, EVENT_BADGE_TTL_MS);
-
-      return () => window.clearTimeout(badgeTimer);
-    }
-
-    const latestWeatherEvent = incomingEvents.findLast((event) => event.type === "weather_change");
-
-    if (latestWeatherEvent) {
-      const nextAlert = {
-        id: `weather-${latestWeatherEvent.lap}-${latestWeatherEvent.to}`,
-        label: `${String(latestWeatherEvent.to).replace("_", " ").toUpperCase()} STARTED`,
-      };
-      setWeatherAlert(nextAlert);
-      const weatherTimer = window.setTimeout(() => {
-        setWeatherAlert((currentAlert) => (currentAlert?.id === nextAlert.id ? null : currentAlert));
-      }, WEATHER_ALERT_TTL_MS);
-
-      return () => window.clearTimeout(weatherTimer);
-    }
-  }, [raceState.events, raceState.currentLap]);
-
+  // rAF animation loop — ALL position math happens here, direct DOM writes
   useEffect(() => {
-    const currentPositions = new Map(raceState.players.map((player) => [player.id, player.position]));
-    const previousPositions = previousPositionsRef.current;
+    if (!pathReady) return undefined;
 
-    if (previousPositions.size > 0) {
-      const generatedNarrativeEvents = [];
+    let frameId;
+    const svgPath = pathRef.current;
+    if (!svgPath) return undefined;
 
-      raceState.players.forEach((player) => {
-        const previousPosition = previousPositions.get(player.id);
+    const animate = () => {
+      const state = raceStateRef.current;
+      const progress = progressRef.current;
+      const len = pathLenRef.current;
+      const smoothed = smoothedRef.current;
+      const players = state.players;
 
-        if (typeof previousPosition !== "number" || previousPosition === player.position) {
-          return;
+      const leaderTime = players.reduce(
+        (lowest, p) => Math.min(lowest, p.totalTime),
+        Number.POSITIVE_INFINITY,
+      );
+
+      for (let i = 0; i < players.length; i++) {
+        const player = players[i];
+        const paceFactor =
+          player.currentLapTime > 0
+            ? clamp(
+                (players[0]?.currentLapTime ?? player.currentLapTime) / player.currentLapTime,
+                0.84, 1.08,
+              )
+            : 1;
+        const intraLapProgress = clamp(progress * paceFactor, 0, 0.999);
+        const timeGap = player.totalTime - leaderTime;
+        const lapGap = player.currentLapTime > 0 ? timeGap / player.currentLapTime : 0;
+        const lapProgress = clamp(state.currentLap + intraLapProgress - lapGap, 0, state.totalLaps);
+        // Use fractional part so each lap = one full circuit around the track
+        const intraLap = ((lapProgress % 1) + 1) % 1;
+        const targetDistance = wrapDistance(intraLap * len, len);
+
+        const current = smoothed[player.id] ?? targetDistance;
+        const delta = shortestDistanceDelta(current, targetDistance, len);
+        const step = Math.abs(delta) < 0.5 ? delta : delta * 0.12;
+        const distance = wrapDistance(current + step, len);
+        smoothed[player.id] = distance;
+
+        const el = carGroupRefs.current[player.id];
+        if (el) {
+          const pt = svgPath.getPointAtLength(distance);
+          el.setAttribute("transform", `translate(${pt.x} ${pt.y})`);
         }
-
-        const positionDelta = previousPosition - player.position;
-        const rival = raceState.players.find((otherPlayer) => {
-          const otherPreviousPosition = previousPositions.get(otherPlayer.id);
-
-          if (otherPlayer.id === player.id || typeof otherPreviousPosition !== "number") {
-            return false;
-          }
-
-          return positionDelta > 0
-            ? otherPreviousPosition < previousPosition && otherPlayer.position >= player.position
-            : otherPreviousPosition > previousPosition && otherPlayer.position <= player.position;
-        });
-
-        generatedNarrativeEvents.push({
-          type: positionDelta > 0 ? "position_gain" : "position_loss",
-          playerId: player.id,
-          rivalPlayerId: rival?.id,
-          lap: raceState.currentLap,
-          previousPosition,
-          newPosition: player.position,
-        });
-      });
-
-      if (generatedNarrativeEvents.length > 0) {
-        setRecentEvents((previousEvents) => (
-          [...previousEvents, ...generatedNarrativeEvents].filter((event) => (
-            raceState.currentLap - event.lap < FEED_VISIBLE_LAPS
-          ))
-        ));
       }
-    }
 
-    previousPositionsRef.current = currentPositions;
-  }, [raceState.currentLap, raceState.players]);
-
-  useEffect(() => {
-    const latestWeatherEvent = raceState.events.findLast((event) => event.type === "weather_change");
-
-    if (!latestWeatherEvent) {
-      return undefined;
-    }
-
-    const nextAlert = {
-      id: `weather-${latestWeatherEvent.lap}-${latestWeatherEvent.to}`,
-      label: `${String(latestWeatherEvent.to).replace("_", " ").toUpperCase()} STARTED`,
+      frameId = window.requestAnimationFrame(animate);
     };
 
-    if (weatherAlert?.id === nextAlert.id) {
-      return undefined;
-    }
+    frameId = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [pathReady]);
 
-    setWeatherAlert(nextAlert);
-
-    const weatherTimer = window.setTimeout(() => {
-      setWeatherAlert((currentAlert) => (currentAlert?.id === nextAlert.id ? null : currentAlert));
-    }, WEATHER_ALERT_TTL_MS);
-
-    return () => window.clearTimeout(weatherTimer);
-  }, [raceState.events, weatherAlert]);
-
-  const playersById = new Map(raceState.players.map((player) => [player.id, player]));
-  const enrichedRecentEvents = recentEvents
-    .map((event) => {
-      if (event.type === "weather_change") {
-        return event;
-      }
-
-      const currentPlayer = playersById.get(event.playerId);
-      const previousPosition = event.previousPosition
-        ?? previousPositionsRef.current.get(event.playerId)
-        ?? currentPlayer?.position;
-      const newPosition = event.newPosition ?? currentPlayer?.position;
-
-      return {
-        ...event,
-        previousPosition,
-        newPosition,
-      };
-    })
-    .filter((event) => raceState.currentLap - event.lap < FEED_VISIBLE_LAPS);
-
+  // carData: metadata only (color, label, gap) — NO position, NO transform
   const leaderTime = raceState.players.reduce(
-    (lowest, player) => Math.min(lowest, player.totalTime),
+    (lowest, p) => Math.min(lowest, p.totalTime),
     Number.POSITIVE_INFINITY,
   );
+  const displayCars = raceState.players.map((player, index) => ({
+    ...player,
+    color:         DRIVER_COLORS[index % DRIVER_COLORS.length],
+    speed:         deriveSpeed(player.currentLapTime),
+    gapFromLeader: player.totalTime - leaderTime,
+  }));
 
-  const displayCars = raceState.players.map((player, index) => {
-    const paceFactor = player.currentLapTime > 0
-      ? clamp((raceState.players[0]?.currentLapTime ?? player.currentLapTime) / player.currentLapTime, 0.84, 1.08)
-      : 1;
-    const sectorProgress = clamp(playbackProgress * paceFactor, 0, 0.999);
-    const timeGap = player.totalTime - leaderTime;
-    const lapGap = player.currentLapTime > 0 ? timeGap / player.currentLapTime : 0;
-    const lapProgress = clamp(raceState.currentLap + sectorProgress - lapGap, 0, raceState.totalLaps);
-    const normalizedTrackPosition = (lapProgress / Math.max(raceState.totalLaps, 1)) * TOTAL_TRACK_LENGTH;
-    const svgLengthPosition = pathLength > 0
-      ? (normalizedTrackPosition / TOTAL_TRACK_LENGTH) * pathLength
-      : 0;
-    const point = pathRef.current?.getPointAtLength(svgLengthPosition) ?? { x: 790, y: 548 };
+  const fastestCurrent = raceState.players.reduce((best, p) => {
+    if (!Number.isFinite(p.currentLapTime)) return best;
+    return !best || p.currentLapTime < best.currentLapTime ? p : best;
+  }, null);
 
-    return {
-      ...player,
-      point,
-      sectorProgress,
-      color: DRIVER_COLORS[index % DRIVER_COLORS.length],
-      badge: activeBadges.findLast((badge) => badge.playerId === player.id) ?? null,
-    };
-  });
-
-  const groupedEvents = Array.from(
-    enrichedRecentEvents.reduce((groupMap, event) => {
-      const existingGroup = groupMap.get(event.lap) ?? [];
-      existingGroup.push(event);
-      groupMap.set(event.lap, existingGroup);
-      return groupMap;
-    }, new Map())
-      .entries(),
-  )
-    .sort((a, b) => b[0] - a[0])
-    .slice(0, FEED_VISIBLE_LAPS)
-    .map(([lap, events]) => ({ lap, events }));
+  const top3 = raceState.players
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .slice(0, Math.min(3, raceState.players.length));
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: "100%",
-        height: "100%",
-        borderRadius: 32,
-        overflow: "hidden",
-        background:
-          "radial-gradient(circle at top left, rgba(255,255,255,0.08), transparent 34%), linear-gradient(180deg, rgba(18,20,25,0.94), rgba(9,11,16,0.98))",
-        border: "1px solid rgba(255,255,255,0.12)",
-        boxShadow: "0 34px 90px rgba(0,0,0,0.34)",
-      }}
-    >
-      <style>{`
-        @keyframes trackBadgeIn {
-          0% { opacity: 0; transform: translateY(10px) scale(0.92); }
-          100% { opacity: 1; transform: translateY(-2px) scale(1); }
-        }
-        @keyframes weatherBannerIn {
-          0% { opacity: 0; transform: translateX(-50%) translateY(-14px) scale(0.94); }
-          20% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          80% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-          100% { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(0.98); }
-        }
-        @keyframes feedItemIn {
-          0% { opacity: 0; transform: translateX(-8px); }
-          100% { opacity: 1; transform: translateX(0); }
-        }
-      `}</style>
+    /* Transparent outer shell — the app.jsx light background shows through */
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
 
+      {/* ── Center track display panel (intentionally dark — it's a "monitor screen") ── */}
       <div
         style={{
           position: "absolute",
-          inset: 0,
-          backgroundImage: "radial-gradient(rgba(255,255,255,0.06) 0.9px, transparent 0.9px)",
-          backgroundSize: "18px 18px",
-          opacity: 0.26,
+          top: 94, left: 286, right: 318, bottom: 22,
+          zIndex: 2,
+          borderRadius: 28,
+          overflow: "hidden",
+          background: "linear-gradient(180deg, rgba(14,17,24,0.96) 0%, rgba(8,11,17,0.98) 100%)",
+          border: "1px solid rgba(0,0,0,0.18)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.26), inset 0 1px 0 rgba(255,255,255,0.04)",
+        }}
+      >
+        {/* Subtle inner grid */}
+        <div style={{
+          position: "absolute", inset: 0,
+          backgroundImage: "linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px)",
+          backgroundSize: "42px 42px",
+          opacity: 0.4, pointerEvents: "none",
+        }} />
+        {/* Vignette */}
+        <div style={{
+          position: "absolute", inset: 0,
+          background: "radial-gradient(circle at center, transparent 42%, rgba(0,0,0,0.22) 100%)",
           pointerEvents: "none",
-        }}
-      />
+        }} />
 
-      {weatherAlert && (
-        <div
-          style={{
-            position: "absolute",
-            top: 22,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 5,
-            padding: "14px 24px",
-            borderRadius: 18,
-            background: "rgba(10,12,16,0.78)",
-            border: "1px solid rgba(255,255,255,0.14)",
-            backdropFilter: "blur(12px)",
-            boxShadow: "0 18px 34px rgba(0,0,0,0.28)",
-            color: "#fff",
-            fontFamily: "'Bebas Neue', sans-serif",
-            fontSize: 30,
-            letterSpacing: 1.8,
-            animation: `weatherBannerIn ${WEATHER_ALERT_TTL_MS}ms ease forwards`,
-          }}
-        >
-          {weatherAlert.label}
-        </div>
-      )}
-
-      <div
-        style={{
-          position: "absolute",
-          left: 22,
-          bottom: 22,
-          zIndex: 4,
-          width: 290,
-          maxHeight: 250,
-          overflowY: "auto",
-          padding: "16px 18px",
-          borderRadius: 22,
-          background: "rgba(9,11,16,0.74)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          backdropFilter: "blur(12px)",
-          boxShadow: "0 18px 34px rgba(0,0,0,0.26)",
-        }}
-      >
-        <div
-          style={{
-            fontFamily: "'Barlow Condensed', sans-serif",
-            fontWeight: 700,
-            fontSize: 10,
-            letterSpacing: 3,
-            color: "#E10600",
-            textTransform: "uppercase",
-          marginBottom: 10,
-        }}
-      >
-          Race Feed
-        </div>
-        {groupedEvents.length === 0 ? (
-          <div
-            style={{
-              fontFamily: "'Barlow Condensed', sans-serif",
-              fontWeight: 600,
-              fontSize: 12,
-              letterSpacing: 1.6,
-              color: "rgba(255,255,255,0.4)",
-              textTransform: "uppercase",
-            }}
-          >
-            Waiting for race events
-          </div>
-        ) : (
-          groupedEvents.map((lapGroup) => (
-            <div
-              key={`lap-${lapGroup.lap}`}
-              style={{
-                padding: "10px 0 2px",
-                borderTop: "1px solid rgba(255,255,255,0.08)",
-                animation: "feedItemIn 220ms ease",
-              }}
-            >
-              <div
-                style={{
-                  fontFamily: "'Bebas Neue', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 22,
-                  letterSpacing: 1.1,
-                  color: "#fff",
-                  textTransform: "uppercase",
-                  marginBottom: 8,
-                }}
-              >
-                Lap {lapGroup.lap}
-              </div>
-              {lapGroup.events.map((event) => {
-                const formatted = formatEventLabel(event, playersById);
-
-                if (!formatted) {
-                  return null;
-                }
-
-                const isPriority = formatted.emphasis === "high";
-
-                return (
-                  <div
-                    key={`${event.type}-${event.playerId ?? event.to}-${event.lap}-${event.timestamp ?? event.lap}`}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "auto 1fr",
-                      gap: 10,
-                      alignItems: "start",
-                      padding: "6px 0",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontFamily: "'Barlow Condensed', sans-serif",
-                        fontWeight: 800,
-                        fontSize: isPriority ? 14 : 12,
-                        letterSpacing: 1.8,
-                        color: isPriority ? "#47d17a" : "rgba(255,255,255,0.52)",
-                        lineHeight: 1.1,
-                        textTransform: "uppercase",
-                        minWidth: 12,
-                      }}
-                    >
-                      {formatted.arrow ?? "•"}
-                    </div>
-                    <div style={{ lineHeight: 1 }}>
-                      <div
-                        style={{
-                          fontFamily: "'Barlow Condensed', sans-serif",
-                          fontWeight: 800,
-                          fontSize: isPriority ? 14 : 12,
-                          letterSpacing: 1.8,
-                          color: isPriority ? "#fff" : "rgba(255,255,255,0.88)",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {formatted.actor}
-                      </div>
-                      <div
-                        style={{
-                          marginTop: 4,
-                          fontFamily: "'Barlow Condensed', sans-serif",
-                          fontWeight: isPriority ? 700 : 600,
-                          fontSize: isPriority ? 13 : 11,
-                          letterSpacing: 1.4,
-                          color: isPriority ? "rgba(116,217,167,0.94)" : "rgba(255,255,255,0.54)",
-                          textTransform: "uppercase",
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {formatted.action}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+        {/* Circuit badge */}
+        <div style={{ position: "absolute", top: 18, left: 22, zIndex: 4, display: "flex", gap: 10 }}>
+          <div style={{
+            padding: "9px 13px",
+            borderRadius: 16,
+            background: "rgba(6,8,12,0.76)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>
+            <div style={{
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontWeight: 700, fontSize: 9, letterSpacing: 2.8,
+              color: "#E10600", textTransform: "uppercase", marginBottom: 5,
+            }}>
+              Circuit
             </div>
-          ))
-        )}
-      </div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 24, lineHeight: 0.95, letterSpacing: 1, color: "#fff" }}>
+              SPA-FRANCORCHAMPS
+            </div>
+          </div>
+          <div style={{
+            padding: "9px 13px",
+            borderRadius: 16,
+            background: "rgba(6,8,12,0.76)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}>
+            <div style={{
+              fontFamily: "'Barlow Condensed',sans-serif",
+              fontWeight: 700, fontSize: 9, letterSpacing: 2.8,
+              color: "rgba(255,255,255,0.42)", textTransform: "uppercase", marginBottom: 5,
+            }}>
+              Live Focus
+            </div>
+            <div style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 22, lineHeight: 0.95, letterSpacing: 1, color: "#fff" }}>
+              {fastestCurrent ? `${getDriverLabel(fastestCurrent)} PUSHING` : "GRID FORMING"}
+            </div>
+          </div>
+        </div>
 
-      <svg
-        viewBox={`0 0 ${TRACK_VIEWBOX.width} ${TRACK_VIEWBOX.height}`}
-        style={{ width: "100%", height: "100%", display: "block" }}
-      >
-        <defs>
-          <filter id="track-glow" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur stdDeviation="10" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
+        {/* Track SVG */}
+        <svg
+          viewBox={`0 0 ${TRACK_VIEWBOX.width} ${TRACK_VIEWBOX.height}`}
+          style={{ width: "100%", height: "100%", display: "block" }}
+        >
+          <defs>
+            <filter id="spa-glow" x="-30%" y="-30%" width="160%" height="160%">
+              <feGaussianBlur stdDeviation="9" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <filter id="sector-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3.5" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <linearGradient id="track-metal" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%"   stopColor="rgba(255,255,255,0.92)" />
+              <stop offset="65%"  stopColor="rgba(214,219,228,0.88)" />
+              <stop offset="100%" stopColor="rgba(169,177,191,0.86)" />
+            </linearGradient>
+          </defs>
 
-        <path
-          ref={pathRef}
-          d={SPA_TRACK_PATH}
-          fill="none"
-          stroke="rgba(255,255,255,0.08)"
-          strokeWidth="40"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+          {/* Track base layers */}
+          <path ref={pathRef} d={SPA_TRACK_PATH} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="56" strokeLinecap="round" strokeLinejoin="round" />
+          <path d={SPA_TRACK_PATH} fill="none" stroke="rgba(255,255,255,0.11)" strokeWidth="30" strokeLinecap="round" strokeLinejoin="round" filter="url(#spa-glow)" />
+          <path d={SPA_TRACK_PATH} fill="none" stroke="url(#track-metal)" strokeWidth="14" strokeLinecap="round" strokeLinejoin="round" />
 
-        <path
-          d={SPA_TRACK_PATH}
-          fill="none"
-          stroke="rgba(255,255,255,0.75)"
-          strokeWidth="14"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          opacity="0.16"
-          filter="url(#track-glow)"
-        />
+          {/* Sector highlights */}
+          {pathLength > 0 && SECTOR_BREAKPOINTS.map((sector) => {
+            const segLen = pathLength * (sector.end - sector.start);
+            const gapLen = pathLength - segLen;
+            return (
+              <path
+                key={sector.key}
+                d={SPA_TRACK_PATH}
+                fill="none"
+                stroke={sector.color}
+                strokeWidth="8"
+                strokeLinecap="round" strokeLinejoin="round"
+                strokeDasharray={`${segLen} ${gapLen}`}
+                strokeDashoffset={-pathLength * sector.start}
+                opacity="0.86"
+                filter="url(#sector-glow)"
+              />
+            );
+          })}
 
-        {pathLength > 0 && SECTOR_BREAKPOINTS.map((sector) => {
-          const segmentLength = pathLength * (sector.end - sector.start);
-          const gapLength = pathLength - segmentLength;
-
-          return (
-            <path
-              key={sector.key}
-              d={SPA_TRACK_PATH}
-              fill="none"
-              stroke={sector.color}
-              strokeWidth="16"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeDasharray={`${segmentLength} ${gapLength}`}
-              strokeDashoffset={-pathLength * sector.start}
-              opacity="0.82"
-            />
-          );
-        })}
-
-        {[
-          { label: "S1", x: 382, y: 120 },
-          { label: "S2", x: 806, y: 246 },
-          { label: "S3", x: 614, y: 564 },
-        ].map((sector) => (
-          <g key={sector.label} transform={`translate(${sector.x} ${sector.y})`}>
-            <circle cx="0" cy="0" r="20" fill="rgba(9,11,16,0.82)" stroke="rgba(255,255,255,0.14)" />
-            <text
-              x="0"
-              y="6"
-              textAnchor="middle"
-              fill="rgba(255,255,255,0.86)"
-              style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 22, letterSpacing: 1 }}
-            >
-              {sector.label}
-            </text>
+          {/* Pit lane marker */}
+          <g transform="translate(240 548)">
+            <rect x="-10" y="-10" width="20" height="20" rx="5" fill="rgba(6,8,12,0.9)" stroke="rgba(255,255,255,0.14)" />
+            <path d="M -6 -6 L 6 -6 L 6 6 L -6 6 Z" fill="none" stroke="#fff" strokeWidth="2" strokeDasharray="4 3" />
           </g>
-        ))}
 
-        {displayCars.map((player) => (
-          <g
-            key={player.id}
-            style={{
-              transform: `translate(${player.point.x}px, ${player.point.y}px)`,
-              transition: "transform 1.65s linear",
-            }}
-          >
-            <circle
-              cx="0"
-              cy="0"
-              r="16"
-              fill={player.color}
-              stroke="rgba(255,255,255,0.92)"
-              strokeWidth="3"
-              style={{ filter: "drop-shadow(0 10px 16px rgba(0,0,0,0.34))" }}
-            />
-            <circle
-              cx="0"
-              cy="0"
-              r="6"
-              fill="rgba(255,255,255,0.95)"
-            />
-            {(player.badge || player.hasRequestedPit) && EVENT_BADGE_META[player.badge?.type ?? "pit_request"] && (
-              <foreignObject x="-18" y="-62" width="132" height="34" style={{ overflow: "visible" }}>
-                <div
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    padding: "5px 10px",
-                    borderRadius: 999,
-                    background: EVENT_BADGE_META[player.badge?.type ?? "pit_request"].color,
-                    color: "#081017",
-                    fontFamily: "'Barlow Condensed', sans-serif",
-                    fontWeight: 800,
-                    fontSize: 10,
-                    letterSpacing: 1.8,
-                    textTransform: "uppercase",
-                    boxShadow: "0 10px 18px rgba(0,0,0,0.25)",
-                    animation: `trackBadgeIn ${player.badge ? EVENT_BADGE_TTL_MS : 900}ms ease forwards`,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {EVENT_BADGE_META[player.badge?.type ?? "pit_request"].label}
+          {/* Turn markers */}
+          {TURN_MARKERS.map((turn) => (
+            <g key={turn.label} transform={`translate(${turn.x} ${turn.y})`}>
+              <circle cx="0" cy="0" r="13" fill="rgba(6,8,12,0.88)" stroke="rgba(255,255,255,0.12)" />
+              <circle cx="0" cy="0" r="4"  fill="rgba(255,255,255,0.72)" />
+              <text x="20" y="4" fill="rgba(255,255,255,0.42)"
+                style={{ fontFamily: "'Barlow Condensed',sans-serif", fontSize: 13, fontWeight: 700, letterSpacing: 1.2 }}>
+                {turn.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Cars — transform is set exclusively by rAF loop, not React */}
+          {displayCars.map((player) => (
+            <g
+              key={player.id}
+              ref={(el) => setCarRef(player.id, el)}
+            >
+              {/* Halo */}
+              <circle cx="0" cy="0" r="18" fill={`${player.color}18`} />
+              {/* Dot */}
+              <circle
+                cx="0" cy="0" r="10"
+                fill={player.color}
+                stroke="rgba(255,255,255,0.92)" strokeWidth="2.5"
+                style={{ filter: `drop-shadow(0 0 7px ${player.color}99) drop-shadow(0 6px 14px rgba(0,0,0,0.4))` }}
+              />
+              {/* Label */}
+              <foreignObject x="14" y="-22" width="138" height="48" style={{ overflow: "visible" }}>
+                <div style={{
+                  display: "inline-flex", flexDirection: "column",
+                  padding: "4px 9px 5px",
+                  borderRadius: 9,
+                  background: "rgba(6,8,12,0.88)",
+                  border: `1px solid ${player.color}38`,
+                  boxShadow: "0 8px 18px rgba(0,0,0,0.36)",
+                  whiteSpace: "nowrap",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 16, color: player.color, lineHeight: 1 }}>
+                      {player.position}
+                    </span>
+                    <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 800, fontSize: 11, letterSpacing: 1.8, color: "#fff", lineHeight: 1 }}>
+                      {getDriverLabel(player)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                    {player.gapFromLeader > 0.01 ? (
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 600, fontSize: 9, letterSpacing: 0.8, color: "rgba(255,255,255,0.48)" }}>
+                        +{player.gapFromLeader.toFixed(1)}s
+                      </span>
+                    ) : (
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: 1, color: "#f4c542" }}>
+                        LEAD
+                      </span>
+                    )}
+                    {player.speed && (
+                      <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: 0.8, color: "rgba(255,255,255,0.54)" }}>
+                        {player.speed}km/h
+                      </span>
+                    )}
+                  </div>
                 </div>
               </foreignObject>
-            )}
-            <foreignObject x="18" y="-18" width="150" height="42" style={{ overflow: "visible" }}>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "6px 10px",
-                  borderRadius: 14,
-                  background: "rgba(9,11,16,0.78)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "#fff",
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 700,
-                  fontSize: 12,
-                  letterSpacing: 1.8,
-                  textTransform: "uppercase",
-                  boxShadow: "0 10px 22px rgba(0,0,0,0.24)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <span style={{ color: player.color }}>{player.position}</span>
-                <span>{getDriverLabel(player)}</span>
+            </g>
+          ))}
+        </svg>
+
+        {/* ── Bottom telemetry strip — top 3 live driver cards ── */}
+        <div style={{
+          position: "absolute", left: 22, right: 22, bottom: 16,
+          zIndex: 4,
+          display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+          gap: 10,
+        }}>
+          {top3.map((driver) => {
+            const tyreMeta  = TYRE_COMPOUNDS[driver.tyre] || TYRE_COMPOUNDS.M;
+            const tyreLife  = Math.max(0, 100 - driver.tyreWear);
+            return (
+              <div key={driver.id} style={{
+                padding: "11px 13px",
+                borderRadius: 16,
+                background: "rgba(6,8,12,0.78)",
+                border: "1px solid rgba(255,255,255,0.07)",
+              }}>
+                <div style={{
+                  fontFamily: "'Barlow Condensed',sans-serif",
+                  fontWeight: 700, fontSize: 10, letterSpacing: 2,
+                  color: "rgba(255,255,255,0.42)", textTransform: "uppercase",
+                  marginBottom: 7,
+                }}>
+                  P{driver.position} · {getDriverLabel(driver)}
+                </div>
+                {/* Tyre bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5 }}>
+                  <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 13, color: tyreMeta.color, lineHeight: 1, minWidth: 10 }}>
+                    {driver.tyre}
+                  </span>
+                  <div style={{ flex: 1, height: 4, borderRadius: 999, background: "rgba(255,255,255,0.1)", overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%", width: `${tyreLife}%`,
+                      background: tyreMeta.color, borderRadius: 999,
+                      transition: "width 0.7s cubic-bezier(0.22,1,0.36,1)",
+                    }} />
+                  </div>
+                  <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 12, color: "rgba(255,255,255,0.46)", minWidth: 22, textAlign: "right" }}>
+                    {Math.round(tyreLife)}%
+                  </span>
+                </div>
+                {/* Fuel bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 9, letterSpacing: 1, color: "rgba(255,255,255,0.3)", minWidth: 10 }}>F</span>
+                  <div style={{ flex: 1, height: 3, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%", width: `${clamp(driver.fuelLoad, 0, 100)}%`,
+                      background: driver.fuelLoad < 20 ? "#ef4444" : "#60a5fa",
+                      borderRadius: 999,
+                      transition: "width 0.7s cubic-bezier(0.22,1,0.36,1)",
+                    }} />
+                  </div>
+                  <span style={{ fontFamily: "'Bebas Neue',sans-serif", fontSize: 12, color: "rgba(255,255,255,0.46)", minWidth: 22, textAlign: "right" }}>
+                    {driver.fuelLoad.toFixed(0)}%
+                  </span>
+                </div>
               </div>
-            </foreignObject>
-          </g>
-        ))}
-      </svg>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
+
+export default memo(TrackViewInner, (prev, next) => {
+  // Only re-render when raceState changes (tick boundaries).
+  // playbackProgress is consumed via ref — no re-render needed.
+  return prev.raceState === next.raceState;
+});

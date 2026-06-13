@@ -21,8 +21,32 @@ export function usePitSystem(setRaceState) {
     }));
   };
 
+  const setFuelMode = (playerId, mode) => {
+    setRaceState((previousState) => ({
+      ...previousState,
+      players: previousState.players.map((player) => (
+        player.id === playerId
+          ? { ...player, fuelMode: mode }
+          : player
+      )),
+    }));
+  };
+
+  const setErsMode = (playerId, mode) => {
+    setRaceState((previousState) => ({
+      ...previousState,
+      players: previousState.players.map((player) => (
+        player.id === playerId
+          ? { ...player, ersMode: mode }
+          : player
+      )),
+    }));
+  };
+
   return {
     requestPit,
     selectPitTyre,
+    setFuelMode,
+    setErsMode,
   };
 }

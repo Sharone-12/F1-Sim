@@ -2,15 +2,16 @@
 // Drop-in replacement for the LandingPage function in app.jsx
 // Panel-based navigation — no scroll bleed. Premium F1 aesthetic.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import RaceHUD from "./components/RaceHUD";
 import TrackView from "./components/TrackView";
-import { syncRaceStateCalculations } from "./simulation/raceEngine";
+import { syncRaceStateCalculations, TYRE_COMPOUNDS } from "./simulation/raceEngine";
 import { useRaceController } from "./hooks/useRaceController";
 import { usePitSystem } from "./hooks/usePitSystem";
 
 const pitGarageImageSrc = new URL("./components/assets/pit_garage.png", import.meta.url).href;
 const f1LogoImageSrc = new URL("./components/assets/New_era_F1_logo.png", import.meta.url).href;
+const spaMapImageSrc = new URL("./components/assets/spa_map.png", import.meta.url).href;
 
 // ─── CONSTANTS (copy from app.jsx) ───────────────────────────────────────────
 const TEAMS = {
@@ -27,16 +28,125 @@ const TEAMS = {
 };
 
 const DEFAULT_TOTAL_LAPS = 44;
+const TOTAL_GRID_SLOTS = 20;
+const TYRE_SETUP_OPTIONS = [
+  { value: "soft", label: "Soft", short: "S" },
+  { value: "medium", label: "Medium", short: "M" },
+  { value: "hard", label: "Hard", short: "H" },
+  { value: "intermediate", label: "Intermediate", short: "I" },
+  { value: "wet", label: "Wet", short: "W" },
+];
+const DRIVING_STYLE_OPTIONS = [
+  { value: "conservative", label: "Conservative" },
+  { value: "balanced", label: "Balanced" },
+  { value: "aggressive", label: "Aggressive" },
+];
+const ERS_OPTIONS = [
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+const PIT_STRATEGY_OPTIONS = [
+  { value: "1-stop", label: "1-stop" },
+  { value: "2-stop", label: "2-stop" },
+  { value: "custom", label: "Custom" },
+];
+const WEATHER_STRATEGY_OPTIONS = [
+  { value: "dry", label: "Dry" },
+  { value: "mixed", label: "Mixed" },
+  { value: "wet", label: "Wet" },
+];
+const RACE_PACE_OPTIONS = [
+  { value: "realistic", label: "Realistic" },
+  { value: "arcade", label: "Arcade" },
+];
+const WEATHER_TO_RACE_WEATHER = {
+  dry: "dry",
+  mixed: "light_rain",
+  wet: "heavy_rain",
+};
+const TYRE_TO_RACE_COMPOUND = {
+  soft: "S",
+  medium: "M",
+  hard: "H",
+  intermediate: "I",
+  wet: "W",
+};
+const PLAYER_COLORS = ["#E10600", "#27F4D2", "#FF8700", "#64C4FF", "#FFD700", "#B6BABD"];
+const AI_DRIVER_POOL = [
+  { id: "verstappen", name: "Max Verstappen", team: "Red Bull", tyre: "soft", fuel: 78, drivingStyle: "aggressive", ers: "high", pitStrategy: "2-stop" },
+  { id: "norris", name: "Lando Norris", team: "McLaren", tyre: "medium", fuel: 74, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "leclerc", name: "Charles Leclerc", team: "Ferrari", tyre: "soft", fuel: 72, drivingStyle: "aggressive", ers: "high", pitStrategy: "1-stop" },
+  { id: "hamilton", name: "Lewis Hamilton", team: "Mercedes", tyre: "medium", fuel: 70, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "piastri", name: "Oscar Piastri", team: "McLaren", tyre: "medium", fuel: 76, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "russell", name: "George Russell", team: "Mercedes", tyre: "medium", fuel: 73, drivingStyle: "balanced", ers: "high", pitStrategy: "2-stop" },
+  { id: "sainz", name: "Carlos Sainz", team: "Williams", tyre: "hard", fuel: 68, drivingStyle: "conservative", ers: "low", pitStrategy: "1-stop" },
+  { id: "alonso", name: "Fernando Alonso", team: "Aston Martin", tyre: "hard", fuel: 69, drivingStyle: "conservative", ers: "medium", pitStrategy: "custom" },
+  { id: "tsunoda", name: "Yuki Tsunoda", team: "RB", tyre: "soft", fuel: 75, drivingStyle: "aggressive", ers: "high", pitStrategy: "2-stop" },
+  { id: "stroll", name: "Lance Stroll", team: "Aston Martin", tyre: "medium", fuel: 71, drivingStyle: "balanced", ers: "low", pitStrategy: "2-stop" },
+  { id: "gasly", name: "Pierre Gasly", team: "Alpine", tyre: "medium", fuel: 72, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "ocon", name: "Esteban Ocon", team: "Haas", tyre: "hard", fuel: 67, drivingStyle: "conservative", ers: "low", pitStrategy: "1-stop" },
+  { id: "hulkenberg", name: "Nico Hulkenberg", team: "Kick Sauber", tyre: "hard", fuel: 68, drivingStyle: "balanced", ers: "medium", pitStrategy: "1-stop" },
+  { id: "albon", name: "Alex Albon", team: "Williams", tyre: "soft", fuel: 74, drivingStyle: "aggressive", ers: "high", pitStrategy: "2-stop" },
+  { id: "bearman", name: "Oliver Bearman", team: "Haas", tyre: "medium", fuel: 71, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "hadjar", name: "Isack Hadjar", team: "RB", tyre: "soft", fuel: 73, drivingStyle: "aggressive", ers: "high", pitStrategy: "2-stop" },
+  { id: "lawson", name: "Liam Lawson", team: "RB", tyre: "medium", fuel: 72, drivingStyle: "balanced", ers: "medium", pitStrategy: "2-stop" },
+  { id: "antonelli", name: "Kimi Antonelli", team: "Mercedes", tyre: "soft", fuel: 75, drivingStyle: "aggressive", ers: "high", pitStrategy: "2-stop" },
+  { id: "bortoleto", name: "Gabriel Bortoleto", team: "Kick Sauber", tyre: "hard", fuel: 69, drivingStyle: "conservative", ers: "low", pitStrategy: "1-stop" },
+];
+const DEFAULT_SETUP_RACE = {
+  laps: DEFAULT_TOTAL_LAPS,
+  weather: "dry",
+  bots: true,
+  weatherStrategy: "dry",
+  safetyCarProbability: 22,
+  paceMode: "realistic",
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const createSetupDriver = ({
+  id,
+  name,
+  team = "",
+  teamColor = "",
+  type = "waiting",
+  tyre = null,
+  fuel = null,
+  drivingStyle = null,
+  ers = null,
+  pitStrategy = null,
+  slotIndex = 0,
+  teamRole = "",
+}) => ({
+  id,
+  name,
+  team,
+  teamColor: teamColor || TEAMS[team]?.color || "#7b828f",
+  type,
+  status: type === "player" ? "Player" : type === "ai" ? "AI" : "Waiting",
+  tyre,
+  fuel,
+  drivingStyle,
+  ers,
+  pitStrategy,
+  slotIndex,
+  teamRole,
+});
 
 const createPlayer = ({
   id,
   name,
+  team = "",
+  isBot = false,
   tyre = "M",
   tyreAge = 0,
   tyreWear = 0,
   fuelLoad = 100,
   setup = {},
   drivingStyle = "balanced",
+  ersMode = "medium",
+  pitStrategy = "2-stop",
   position = 1,
   totalTime = 0,
   currentLapTime = 0,
@@ -48,6 +158,8 @@ const createPlayer = ({
 }) => ({
   id,
   name,
+  team,
+  isBot,
   tyre,
   tyreAge,
   tyreWear,
@@ -58,6 +170,8 @@ const createPlayer = ({
     rideHeight: setup.rideHeight ?? 50,
   },
   drivingStyle,
+  ersMode,
+  pitStrategy,
   position,
   totalTime,
   currentLapTime,
@@ -66,56 +180,128 @@ const createPlayer = ({
   pitCount,
   nextTyreCompound,
   setupLocked,
+  stintHistory: [{ compound: tyre, startLap: 0 }],
 });
 
-const createSamplePlayers = () => ([
-  createPlayer({
-    id: "hamilton",
-    name: "Lewis Hamilton",
-    tyre: "S",
-    tyreAge: 4,
-    tyreWear: 6,
-    fuelLoad: 92,
-    setup: { downforce: 64, suspension: 58, rideHeight: 42 },
-    drivingStyle: "balanced",
-    position: 1,
-  }),
-  createPlayer({
-    id: "verstappen",
-    name: "Max Verstappen",
-    tyre: "M",
-    tyreAge: 3,
-    tyreWear: 4,
-    fuelLoad: 94,
-    setup: { downforce: 57, suspension: 61, rideHeight: 39 },
-    drivingStyle: "aggressive",
-    position: 2,
-  }),
-  createPlayer({
-    id: "norris",
-    name: "Lando Norris",
-    tyre: "H",
-    tyreAge: 2,
-    tyreWear: 2,
-    fuelLoad: 96,
-    setup: { downforce: 60, suspension: 55, rideHeight: 44 },
-    drivingStyle: "conservative",
-    position: 3,
-  }),
-]);
+const buildSetupDriverSlots = ({ username = "Player", includeBots = true, lobbyPlayers = [] } = {}) => {
+  const humanPlayers = [
+    { id: "player-1", name: username, team: "Ferrari", teamColor: TEAMS.Ferrari.color, type: "player" },
+    ...lobbyPlayers.slice(1, TOTAL_GRID_SLOTS).map((player, index) => ({
+      id: `player-${index + 2}`,
+      name: player.username || `Player ${index + 2}`,
+      team: player.team || `Player ${index + 2}`,
+      teamColor: PLAYER_COLORS[(index + 1) % PLAYER_COLORS.length],
+      type: "player",
+    })),
+  ];
 
-const createInitialRaceState = () => {
-  const initialRaceState = {
-    players: createSamplePlayers(),
+  return Array.from({ length: TOTAL_GRID_SLOTS }, (_, index) => {
+    const human = humanPlayers[index];
+    if (human) {
+      return createSetupDriver({
+        id: human.id,
+        name: human.name,
+        team: human.team,
+        teamColor: human.teamColor,
+        type: "player",
+        tyre: "medium",
+        fuel: 72,
+        drivingStyle: "balanced",
+        ers: "medium",
+        pitStrategy: "2-stop",
+        slotIndex: index + 1,
+        teamRole: "player",
+      });
+    }
+
+    if (includeBots) {
+      const bot = AI_DRIVER_POOL[index - humanPlayers.length] || AI_DRIVER_POOL[index % AI_DRIVER_POOL.length];
+      return createSetupDriver({
+        id: bot.id,
+        name: bot.name,
+        team: bot.team,
+        type: "ai",
+        tyre: bot.tyre,
+        fuel: bot.fuel,
+        drivingStyle: bot.drivingStyle,
+        ers: bot.ers,
+        pitStrategy: bot.pitStrategy,
+        slotIndex: index + 1,
+        teamRole: "ai",
+      });
+    }
+
+    return createSetupDriver({
+      id: `slot-${index + 1}`,
+      name: `Waiting Slot ${String(index + 1).padStart(2, "0")}`,
+      team: "Open Seat",
+      teamColor: "#7b828f",
+      type: "waiting",
+      slotIndex: index + 1,
+      teamRole: "waiting",
+    });
+  });
+};
+
+const buildActivePlayersFromSetup = (setup) => {
+  const raceWeather = WEATHER_TO_RACE_WEATHER[setup.race.weatherStrategy] || "dry";
+
+  return setup.drivers
+    .filter((driver) => driver.type !== "waiting")
+    .map((driver, index) => {
+      const styleOffset = driver.drivingStyle === "aggressive" ? -4 : driver.drivingStyle === "conservative" ? 3 : 0;
+      const ersOffset = driver.ers === "high" ? -2 : driver.ers === "low" ? 2 : 0;
+      const paceOffset = setup.race.paceMode === "arcade" ? -2 : 1;
+      const weatherOffset = raceWeather === "heavy_rain" ? 4 : raceWeather === "light_rain" ? 2 : 0;
+
+      return createPlayer({
+        id: driver.id,
+        name: driver.name,
+        team: driver.team,
+        isBot: driver.type === "ai",
+        tyre: TYRE_TO_RACE_COMPOUND[driver.tyre] || "M",
+        tyreAge: 0,
+        tyreWear: 0,
+        fuelLoad: driver.fuel ?? 70,
+        setup: {
+          downforce: clamp(52 + styleOffset + weatherOffset, 35, 72),
+          suspension: clamp(50 + paceOffset - ersOffset, 35, 72),
+          rideHeight: clamp(48 + weatherOffset - paceOffset, 35, 72),
+        },
+        drivingStyle: driver.drivingStyle || "balanced",
+        ersMode: driver.ers || "medium",
+        pitStrategy: driver.pitStrategy || "2-stop",
+        position: index + 1,
+        setupLocked: driver.type === "ai",
+      });
+    });
+};
+
+const buildSetupState = (username = "Player", includeBots = true, lobbyPlayers = []) => {
+  const setup = {
+    drivers: buildSetupDriverSlots({ username, includeBots, lobbyPlayers }),
+    race: { ...DEFAULT_SETUP_RACE, bots: includeBots },
+    selectedDriverId: "player-1",
+    flowStep: 2,
+  };
+
+  return setup;
+};
+
+const createInitialRaceState = (username = "Player", includeBots = true, lobbyPlayers = []) => {
+  const setup = buildSetupState(username, includeBots, lobbyPlayers);
+  const players = buildActivePlayersFromSetup(setup);
+
+  return {
+    players,
+    setup,
     racePhase: "lobby",
-    totalLaps: DEFAULT_TOTAL_LAPS,
+    totalLaps: setup.race.laps,
     currentLap: 0,
-    weather: "dry",
+    weather: WEATHER_TO_RACE_WEATHER[setup.race.weatherStrategy] || "dry",
     leaderboard: [],
     events: [],
   };
-
-  return syncRaceStateCalculations(initialRaceState);
 };
 
 // ─── ENHANCED GLOBAL STYLES ───────────────────────────────────────────────────
@@ -141,6 +327,10 @@ export const LANDING_STYLES = `
   @keyframes heroSweep  { 0% { transform:translateX(-15%) skewX(-14deg); opacity:0; } 20% { opacity:0.26; } 100% { transform:translateX(115%) skewX(-14deg); opacity:0; } }
   @keyframes heroGlow   { 0%,100% { opacity:0.42; transform:scale(1); } 50% { opacity:0.6; transform:scale(1.04); } }
   @keyframes heroTitleIn { from { opacity:0; transform:translate(-50%, -46%); } to { opacity:1; transform:translate(-50%, -50%); } }
+  @keyframes startLightOn { 0% { opacity:0; transform:scale(0.55); } 60% { opacity:1; transform:scale(1.12); } 100% { opacity:1; transform:scale(1); } }
+  @keyframes goFlash { 0% { opacity:0; transform:translate(-50%,-50%) scale(0.6); } 18% { opacity:1; transform:translate(-50%,-50%) scale(1.08); } 78% { opacity:1; transform:translate(-50%,-50%) scale(1); } 100% { opacity:0; transform:translate(-50%,-50%) scale(1.18); } }
+  @keyframes weatherIn { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+  @keyframes raceScreenIn { from { opacity:0; transform:scale(0.985); } to { opacity:1; transform:scale(1); } }
 
   ::-webkit-scrollbar { width:3px; }
   ::-webkit-scrollbar-track { background:transparent; }
@@ -376,8 +566,8 @@ export const LANDING_STYLES = `
     position:fixed;
     inset:0;
     z-index:190;
-    background:rgba(7,8,10,0.78);
-    backdrop-filter:blur(12px);
+    background:radial-gradient(circle at top, rgba(225,6,0,0.1), transparent 28%), rgba(7,8,10,0.88);
+    backdrop-filter:blur(14px);
     display:flex;
     align-items:center;
     justify-content:center;
@@ -386,15 +576,15 @@ export const LANDING_STYLES = `
   }
 
   .setup-shell {
-    width:min(1340px, 100%);
+    width:min(1480px, 100%);
     max-height:calc(100vh - 56px);
     overflow:hidden;
     border-radius:34px;
     border:1px solid rgba(255,255,255,0.18);
     background:
-      linear-gradient(180deg, rgba(158,164,175,0.9) 0%, rgba(92,98,108,0.9) 100%),
+      linear-gradient(180deg, rgba(14,16,20,0.96) 0%, rgba(25,27,34,0.94) 100%),
       url('${pitGarageImageSrc}') center center / cover no-repeat;
-    box-shadow:0 40px 90px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.22);
+    box-shadow:0 40px 90px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.14);
     position:relative;
   }
 
@@ -403,11 +593,11 @@ export const LANDING_STYLES = `
     position:absolute;
     inset:0;
     background:
-      linear-gradient(135deg, rgba(255,255,255,0.12), transparent 36%, transparent 65%, rgba(225,6,0,0.08)),
-      radial-gradient(circle at top left, rgba(255,255,255,0.22), transparent 36%),
-      linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px),
-      linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-    background-size:auto, auto, 28px 28px, 28px 28px;
+      linear-gradient(135deg, rgba(255,255,255,0.08), transparent 32%, transparent 70%, rgba(225,6,0,0.06)),
+      radial-gradient(circle at top left, rgba(255,255,255,0.16), transparent 38%),
+      linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px),
+      linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+    background-size:auto, auto, 30px 30px, 30px 30px;
     pointer-events:none;
   }
 
@@ -416,6 +606,7 @@ export const LANDING_STYLES = `
     z-index:1;
     display:flex;
     flex-direction:column;
+    height:100%;
     max-height:calc(100vh - 56px);
   }
 
@@ -424,26 +615,55 @@ export const LANDING_STYLES = `
     align-items:flex-start;
     justify-content:space-between;
     gap:24px;
-    padding:28px 30px 22px;
+    padding:24px 26px 18px;
     border-bottom:1px solid rgba(255,255,255,0.12);
-    background:linear-gradient(180deg, rgba(17,18,21,0.58), rgba(17,18,21,0.18));
+    background:linear-gradient(180deg, rgba(7,8,10,0.72), rgba(7,8,10,0.18));
+    backdrop-filter:blur(12px);
   }
 
-  .setup-grid {
+  .setup-flow {
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-top:18px;
+    flex-wrap:wrap;
+  }
+
+  .setup-flow-pill {
+    padding:8px 12px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.12);
+    background:rgba(255,255,255,0.04);
+    color:rgba(255,255,255,0.72);
+    font-family:'Barlow Condensed',sans-serif;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:2.4px;
+    text-transform:uppercase;
+  }
+
+  .setup-layout {
     display:grid;
-    grid-template-columns:repeat(auto-fit, minmax(310px, 1fr));
-    gap:22px;
-    padding:24px 30px 30px;
+    grid-template-columns:minmax(280px, 0.88fr) minmax(0, 1.28fr) minmax(300px, 0.84fr);
+    gap:18px;
+    padding:18px 18px 0;
+    min-height:0;
+    flex:1;
+  }
+
+  .setup-column {
+    min-height:0;
     overflow:auto;
+    padding-right:4px;
   }
 
   .setup-card {
     position:relative;
     border-radius:28px;
     border:1px solid rgba(255,255,255,0.12);
-    background:linear-gradient(180deg, rgba(18,19,23,0.94) 0%, rgba(29,31,36,0.92) 100%);
-    box-shadow:0 24px 60px rgba(0,0,0,0.28);
-    padding:22px;
+    background:linear-gradient(180deg, rgba(12,14,18,0.96) 0%, rgba(19,21,28,0.94) 100%);
+    box-shadow:0 24px 60px rgba(0,0,0,0.3);
+    padding:20px;
     display:flex;
     flex-direction:column;
     gap:18px;
@@ -511,6 +731,62 @@ export const LANDING_STYLES = `
     transform:none;
   }
 
+  .setup-switch {
+    position:relative;
+    display:inline-flex;
+    align-items:center;
+    justify-content:space-between;
+    width:100%;
+    gap:14px;
+    padding:14px 16px;
+    border-radius:18px;
+    border:1px solid rgba(255,255,255,0.1);
+    background:rgba(255,255,255,0.04);
+    color:#fff;
+    cursor:pointer;
+    transition:transform 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+  }
+
+  .setup-switch:hover {
+    transform:translateY(-1px);
+    border-color:rgba(255,255,255,0.22);
+  }
+
+  .setup-switch.active {
+    border-color:rgba(225,6,0,0.42);
+    background:rgba(225,6,0,0.1);
+  }
+
+  .setup-switch-track {
+    width:46px;
+    height:24px;
+    border-radius:999px;
+    background:rgba(255,255,255,0.14);
+    position:relative;
+    flex-shrink:0;
+    transition:background 0.16s ease;
+  }
+
+  .setup-switch.active .setup-switch-track {
+    background:#E10600;
+  }
+
+  .setup-switch-thumb {
+    position:absolute;
+    width:18px;
+    height:18px;
+    top:3px;
+    left:3px;
+    border-radius:50%;
+    background:#fff;
+    transition:left 0.16s ease;
+    box-shadow:0 4px 10px rgba(0,0,0,0.26);
+  }
+
+  .setup-switch.active .setup-switch-thumb {
+    left:25px;
+  }
+
   .setup-slider {
     display:flex;
     flex-direction:column;
@@ -553,14 +829,193 @@ export const LANDING_STYLES = `
     cursor:pointer;
   }
 
+  .setup-lineup {
+    display:flex;
+    gap:10px;
+    overflow-x:auto;
+    padding-bottom:4px;
+  }
+
+  .setup-lineup::-webkit-scrollbar {
+    height:4px;
+  }
+
+  .driver-slot {
+    min-width:148px;
+    flex:0 0 148px;
+    border-radius:18px;
+    border:1px solid rgba(255,255,255,0.1);
+    background:linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03));
+    padding:12px;
+    color:#fff;
+    cursor:pointer;
+    transition:transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    position:relative;
+    overflow:hidden;
+  }
+
+  .driver-slot:hover {
+    transform:translateY(-3px);
+    border-color:rgba(255,255,255,0.24);
+  }
+
+  .driver-slot.active {
+    transform:translateY(-3px);
+    border-color:rgba(255,255,255,0.34);
+    box-shadow:0 18px 40px rgba(0,0,0,0.26), 0 0 0 1px rgba(225,6,0,0.18), 0 0 30px rgba(225,6,0,0.14);
+  }
+
+  .driver-slot.active::before {
+    content:'';
+    position:absolute;
+    inset:-2px;
+    border-radius:20px;
+    border:1px solid rgba(225,6,0,0.36);
+    pointer-events:none;
+  }
+
+  .driver-strip {
+    width:100%;
+    height:5px;
+    border-radius:999px;
+    margin-bottom:10px;
+  }
+
+  .driver-meta {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    margin-top:10px;
+  }
+
+  .driver-badge {
+    padding:5px 8px;
+    border-radius:999px;
+    font-family:'Barlow Condensed',sans-serif;
+    font-size:10px;
+    font-weight:800;
+    letter-spacing:2px;
+    text-transform:uppercase;
+    border:1px solid rgba(255,255,255,0.12);
+    background:rgba(255,255,255,0.04);
+  }
+
+  .driver-badge.player {
+    color:#fff;
+    background:rgba(225,6,0,0.18);
+    border-color:rgba(225,6,0,0.32);
+  }
+
+  .driver-badge.ai {
+    color:rgba(255,255,255,0.92);
+    background:rgba(39,244,210,0.1);
+    border-color:rgba(39,244,210,0.22);
+  }
+
+  .driver-badge.waiting {
+    color:rgba(255,255,255,0.58);
+    background:rgba(255,255,255,0.03);
+  }
+
+  .setup-panel-title {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    margin-bottom:16px;
+  }
+
+  .setup-panel-subtitle {
+    font-family:'Barlow Condensed',sans-serif;
+    font-weight:500;
+    font-size:14px;
+    line-height:1.6;
+    color:rgba(255,255,255,0.66);
+    margin-top:8px;
+  }
+
+  .setup-detail {
+    border-radius:24px;
+    border:1px solid rgba(255,255,255,0.1);
+    background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    padding:18px;
+  }
+
+  .setup-detail.glow {
+    box-shadow:0 0 0 1px rgba(225,6,0,0.12), 0 24px 60px rgba(0,0,0,0.28);
+  }
+
+  .setup-section {
+    border-radius:24px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.04);
+    padding:18px;
+    margin-bottom:16px;
+  }
+
+  .setup-section + .setup-section {
+    margin-top:14px;
+  }
+
+  .setup-section-header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:14px;
+  }
+
+  .setup-section-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(160px, 1fr));
+    gap:10px;
+  }
+
+  .setup-race-config {
+    display:grid;
+    gap:14px;
+  }
+
+  .setup-note {
+    margin-top:4px;
+    color:rgba(255,255,255,0.52);
+    font-size:12px;
+    line-height:1.5;
+    font-family:'Barlow Condensed',sans-serif;
+    font-weight:500;
+  }
+
+  .setup-error {
+    color:#ff5c5c;
+    font-family:'Barlow Condensed',sans-serif;
+    font-size:12px;
+    letter-spacing:1px;
+    font-weight:700;
+    text-transform:uppercase;
+  }
+
+  .setup-summary {
+    display:grid;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+    gap:10px;
+  }
+
+  .setup-summary-card {
+    border-radius:18px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.04);
+    padding:14px 12px;
+  }
+
   .setup-footer {
     display:flex;
     align-items:center;
     justify-content:space-between;
     gap:18px;
-    padding:22px 30px 28px;
+    padding:16px 18px 20px;
     border-top:1px solid rgba(255,255,255,0.1);
-    background:linear-gradient(180deg, rgba(17,18,21,0.16), rgba(17,18,21,0.45));
+    background:linear-gradient(180deg, rgba(7,8,10,0.12), rgba(7,8,10,0.52));
   }
 
   @media (max-width: 900px) {
@@ -568,6 +1023,16 @@ export const LANDING_STYLES = `
     .setup-footer {
       flex-direction:column;
       align-items:stretch;
+    }
+
+    .setup-layout {
+      grid-template-columns:1fr;
+      overflow:auto;
+      padding-bottom:12px;
+    }
+
+    .setup-column {
+      overflow:visible;
     }
 
     .setup-tyre-grid,
@@ -1165,7 +1630,18 @@ function AboutSection({ onCreateRoom, onShowJoin }) {
   );
 }
 
-function SetupSlider({ label, value, onChange, minLabel, maxLabel, unit = "%", disabled = false }) {
+function SetupSlider({
+  label,
+  value,
+  onChange,
+  minLabel,
+  maxLabel,
+  unit = "%",
+  disabled = false,
+  min = 0,
+  max = 100,
+  step = 1,
+}) {
   return (
     <div className="setup-slider">
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
@@ -1175,8 +1651,9 @@ function SetupSlider({ label, value, onChange, minLabel, maxLabel, unit = "%", d
       <input
         className="setup-range"
         type="range"
-        min="0"
-        max="100"
+        min={min}
+        max={max}
+        step={step}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -1189,147 +1666,252 @@ function SetupSlider({ label, value, onChange, minLabel, maxLabel, unit = "%", d
   );
 }
 
-function PlayerSetupCard({ player, onUpdatePlayer }) {
-  const disabled = player.setupLocked;
-
+function ChoiceRow({ label, value, options, onChange, disabled = false }) {
   return (
-    <div className="setup-card">
-      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:18 }}>
-        <div>
-          <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:3.2, color:"#E10600", textTransform:"uppercase", marginBottom:6 }}>
-            Driver {String(player.position).padStart(2, "0")}
-          </div>
-          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:38, color:"#fff", lineHeight:0.95, letterSpacing:1.4 }}>
-            {player.name}
-          </div>
-        </div>
-        <div className="setup-chip">{player.setupLocked ? "Locked" : "Editable"}</div>
+    <div className="setup-section">
+      <div className="setup-section-header">
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.8, color:"rgba(255,255,255,0.58)", textTransform:"uppercase" }}>{label}</div>
+        <div className="setup-chip">{String(value).replace(/_/g, " ")}</div>
       </div>
-
-      <div className="setup-chip-row">
-        <div className="setup-chip">Tyre Age {player.tyreAge}L</div>
-        <div className="setup-chip">Wear {player.tyreWear}%</div>
-        <div className="setup-chip">Style {player.drivingStyle}</div>
-      </div>
-
-      <div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.8, color:"rgba(255,255,255,0.58)", textTransform:"uppercase", marginBottom:10 }}>
-          Tyre Compound
-        </div>
-        <div className="setup-tyre-grid">
-          {["S", "M", "H"].map((compound) => {
-            const compoundMeta = TYRE_COMPOUNDS[compound];
-            const isActive = player.tyre === compound;
-
-            return (
-              <button
-                key={compound}
-                type="button"
-                className={`setup-choice${isActive ? " active" : ""}`}
-                disabled={disabled}
-                onClick={() => onUpdatePlayer(player.id, { tyre: compound })}
-                style={{
-                  borderColor: isActive ? compoundMeta.color : "rgba(255,255,255,0.12)",
-                  background: isActive
-                    ? `linear-gradient(180deg, ${compoundMeta.color}22 0%, rgba(255,255,255,0.05) 100%)`
-                    : "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
-                }}
-              >
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:34, lineHeight:1, letterSpacing:1.5, color:compoundMeta.color }}>{compound}</div>
-                <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.2, color:"rgba(255,255,255,0.68)", textTransform:"uppercase", marginTop:6 }}>
-                  {compoundMeta.name}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <SetupSlider
-        label="Fuel Load"
-        value={player.fuelLoad}
-        onChange={(value) => onUpdatePlayer(player.id, { fuelLoad: value })}
-        minLabel="Trimmed"
-        maxLabel="Heavy"
-        disabled={disabled}
-      />
-
-      <SetupSlider
-        label="Downforce"
-        value={player.setup.downforce}
-        onChange={(value) => onUpdatePlayer(player.id, { setup: { downforce: value } })}
-        minLabel="Low Drag"
-        maxLabel="High Grip"
-        disabled={disabled}
-      />
-
-      <SetupSlider
-        label="Suspension"
-        value={player.setup.suspension}
-        onChange={(value) => onUpdatePlayer(player.id, { setup: { suspension: value } })}
-        minLabel="Soft"
-        maxLabel="Stiff"
-        disabled={disabled}
-      />
-
-      <SetupSlider
-        label="Ride Height"
-        value={player.setup.rideHeight}
-        onChange={(value) => onUpdatePlayer(player.id, { setup: { rideHeight: value } })}
-        minLabel="Low"
-        maxLabel="High"
-        disabled={disabled}
-      />
-
-      <div>
-        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.8, color:"rgba(255,255,255,0.58)", textTransform:"uppercase", marginBottom:10 }}>
-          Driving Style
-        </div>
-        <div className="setup-style-grid">
-          {["aggressive", "balanced", "conservative"].map((style) => {
-            const isActive = player.drivingStyle === style;
-
-            return (
-              <button
-                key={style}
-                type="button"
-                className={`setup-choice${isActive ? " active" : ""}`}
-                disabled={disabled}
-                onClick={() => onUpdatePlayer(player.id, { drivingStyle: style })}
-                style={{
-                  borderColor: isActive ? "rgba(225,6,0,0.72)" : "rgba(255,255,255,0.12)",
-                  background: isActive
-                    ? "linear-gradient(180deg, rgba(225,6,0,0.22) 0%, rgba(255,255,255,0.04) 100%)"
-                    : "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
-                }}
-              >
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, lineHeight:1, letterSpacing:1.1, color:"#fff", textTransform:"uppercase" }}>
-                  {style}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+      <div className="setup-style-grid">
+        {options.map((option) => {
+          const isActive = value === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`setup-choice${isActive ? " active" : ""}`}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+              style={{
+                borderColor: isActive ? "rgba(225,6,0,0.72)" : "rgba(255,255,255,0.12)",
+                background: isActive
+                  ? "linear-gradient(180deg, rgba(225,6,0,0.22) 0%, rgba(255,255,255,0.04) 100%)"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
+              }}
+            >
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, lineHeight:1, letterSpacing:1.1, color:"#fff", textTransform:"uppercase" }}>
+                {option.label}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function StrategySetupPanel({ raceState, onClose, onUpdatePlayer, onConfirmSetup }) {
+function DriverSlotCard({ driver, active, onSelect }) {
+  return (
+    <button
+      type="button"
+      className={`driver-slot${active ? " active" : ""}`}
+      onClick={() => onSelect(driver.id)}
+    >
+      <div className="driver-strip" style={{ background: driver.type === "waiting" ? "#7b828f" : driver.teamColor }} />
+      <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:10 }}>
+        <div style={{ minWidth:0, flex:1 }}>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, letterSpacing:1, lineHeight:0.95, color:"#fff", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {driver.name}
+          </div>
+          <div style={{ marginTop:4, fontFamily:"'Barlow Condensed',sans-serif", fontSize:11, letterSpacing:1.6, color:"rgba(255,255,255,0.48)", textTransform:"uppercase", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+            {driver.type === "waiting" ? "Open Seat" : driver.team}
+          </div>
+        </div>
+        <div className={`driver-badge ${driver.type}`}>{driver.status}</div>
+      </div>
+      <div className="driver-meta">
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:10, fontWeight:700, letterSpacing:2.2, color:"rgba(255,255,255,0.42)", textTransform:"uppercase" }}>
+          Slot {String(driver.slotIndex).padStart(2, "0")}
+        </div>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:11, fontWeight:700, letterSpacing:1.8, color:"rgba(255,255,255,0.72)", textTransform:"uppercase" }}>
+          {driver.type === "waiting" ? "Unassigned" : `${driver.tyre} tyre`}
+        </div>
+      </div>
+      <div style={{ marginTop:10, fontFamily:"'Barlow Condensed',sans-serif", fontSize:11, fontWeight:600, letterSpacing:1.6, color:"rgba(255,255,255,0.42)", textTransform:"uppercase" }}>
+        {driver.status}
+      </div>
+    </button>
+  );
+}
+
+function DriverSetupPanel({ driver, onUpdateDriver }) {
+  const disabled = !driver || driver.type === "waiting";
+
+  if (!driver) {
+    return (
+      <div className="setup-detail glow" style={{ minHeight:340, display:"grid", placeItems:"center", textAlign:"center" }}>
+        <div>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:44, letterSpacing:2, lineHeight:0.95, color:"#fff" }}>No Driver Selected</div>
+          <div className="setup-panel-subtitle">Choose a slot from the lineup to edit strategy inputs.</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="setup-detail glow">
+      <div className="setup-panel-title">
+        <div style={{ minWidth:0 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+            <div style={{ width:12, height:12, borderRadius:"50%", background:driver.type === "waiting" ? "#7b828f" : driver.teamColor, boxShadow:`0 0 0 4px ${(driver.type === "waiting" ? "#7b828f" : driver.teamColor)}22` }} />
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:3.2, color:"#E10600", textTransform:"uppercase" }}>
+              Slot {String(driver.slotIndex).padStart(2, "0")}
+            </div>
+          </div>
+          <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:42, lineHeight:0.96, letterSpacing:1.2, color:"#fff", marginTop:6 }}>
+            {driver.name}
+          </div>
+          <div className="setup-panel-subtitle">{driver.type === "waiting" ? "Open Seat" : driver.team} • {driver.status}</div>
+        </div>
+        <div className={`driver-badge ${driver.type}`}>{driver.status}</div>
+      </div>
+
+      {driver.type === "waiting" ? (
+        <div className="setup-section" style={{ minHeight:220, display:"grid", placeItems:"center", textAlign:"center" }}>
+          <div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:34, lineHeight:1, color:"#fff" }}>Empty grid slot</div>
+            <div className="setup-note">Leave this slot open for multiplayer, or enable bots to backfill the grid automatically.</div>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="setup-chip-row">
+            <div className="setup-chip">Tyre {driver.tyre}</div>
+            <div className="setup-chip">Fuel {driver.fuel}%</div>
+            <div className="setup-chip">ERS {driver.ers}</div>
+            <div className="setup-chip">Pit {driver.pitStrategy}</div>
+          </div>
+
+          <div className="setup-section">
+            <div className="setup-section-header">
+              <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.8, color:"rgba(255,255,255,0.58)", textTransform:"uppercase" }}>Tyre Compound</div>
+              <div className="setup-chip">{driver.tyre}</div>
+            </div>
+            <div className="setup-tyre-grid">
+              {TYRE_SETUP_OPTIONS.map((option) => {
+                const compoundMeta = TYRE_COMPOUNDS[option.short];
+                const isActive = driver.tyre === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`setup-choice${isActive ? " active" : ""}`}
+                    disabled={disabled}
+                    onClick={() => onUpdateDriver(driver.id, { tyre: option.value })}
+                    style={{
+                      borderColor: isActive ? compoundMeta.color : "rgba(255,255,255,0.12)",
+                      background: isActive
+                        ? `linear-gradient(180deg, ${compoundMeta.color}22 0%, rgba(255,255,255,0.05) 100%)`
+                        : "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))",
+                    }}
+                  >
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:34, lineHeight:1, letterSpacing:1.5, color:compoundMeta.color }}>{option.short}</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.2, color:"rgba(255,255,255,0.68)", textTransform:"uppercase", marginTop:6 }}>
+                      {compoundMeta.name}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <SetupSlider
+            label="Starting Fuel Load"
+            value={driver.fuel}
+            onChange={(value) => onUpdateDriver(driver.id, { fuel: value })}
+            minLabel="Low"
+            maxLabel="High"
+            disabled={disabled}
+            min={0}
+            max={100}
+            step={1}
+          />
+
+          <ChoiceRow
+            label="Driving Style"
+            value={driver.drivingStyle}
+            options={DRIVING_STYLE_OPTIONS}
+            onChange={(value) => onUpdateDriver(driver.id, { drivingStyle: value })}
+            disabled={disabled}
+          />
+
+          <ChoiceRow
+            label="ERS Mode"
+            value={driver.ers}
+            options={ERS_OPTIONS}
+            onChange={(value) => onUpdateDriver(driver.id, { ers: value })}
+            disabled={disabled}
+          />
+
+          <ChoiceRow
+            label="Pit Strategy"
+            value={driver.pitStrategy}
+            options={PIT_STRATEGY_OPTIONS}
+            onChange={(value) => onUpdateDriver(driver.id, { pitStrategy: value })}
+            disabled={disabled}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function SetupToggle({ label, value, onToggle, onLabel, offLabel, description }) {
+  return (
+    <button type="button" className={`setup-switch${value ? " active" : ""}`} onClick={() => onToggle(!value)}>
+      <div style={{ minWidth:0, textAlign:"left" }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:12, letterSpacing:2.2, textTransform:"uppercase" }}>{label}</div>
+        {description && <div className="setup-note">{description}</div>}
+      </div>
+      <div style={{ display:"flex", alignItems:"center", gap:12, flexShrink:0 }}>
+        <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2, textTransform:"uppercase", color:"rgba(255,255,255,0.62)" }}>
+          {value ? onLabel : offLabel}
+        </div>
+        <div className="setup-switch-track">
+          <span className="setup-switch-thumb" />
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function StrategySetupPanel({
+  raceState,
+  onClose,
+  onSelectDriver,
+  onUpdateDriver,
+  onUpdateRace,
+  onConfirmSetup,
+  onToggleBots,
+  setupError,
+}) {
+  const setup = raceState.setup || buildSetupState();
+  const selectedDriver = setup.drivers.find((driver) => driver.id === setup.selectedDriverId) || setup.drivers[0];
+  const occupiedDrivers = setup.drivers.filter((driver) => driver.type !== "waiting");
+  const activeCount = occupiedDrivers.length;
+  const canConfirm = activeCount > 0 && occupiedDrivers.every((driver) => driver.tyre && driver.fuel !== null && driver.fuel !== undefined);
+
   return (
     <div className="setup-overlay" onClick={onClose}>
       <div className="setup-shell" onClick={(event) => event.stopPropagation()}>
         <div className="setup-content">
           <div className="setup-header">
-            <div>
+            <div style={{ minWidth:0 }}>
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:4, color:"#E10600", textTransform:"uppercase", marginBottom:8 }}>
-                Setup Phase
+                Setup Phase • Step 2 of 3
               </div>
-              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(38px, 5vw, 64px)", lineHeight:0.92, letterSpacing:1.5, color:"#fff", marginBottom:10 }}>
+              <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(38px, 5vw, 66px)", lineHeight:0.92, letterSpacing:1.5, color:"#fff", marginBottom:10 }}>
                 Race Strategy Control
               </div>
-              <div style={{ maxWidth:760, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:17, lineHeight:1.45, color:"rgba(255,255,255,0.76)" }}>
-                Dial in compounds, fuel, balance, and driving intent for each player before the first lap. Nothing random, just clean strategic inputs locked before the race begins.
+              <div style={{ maxWidth:840, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:16, lineHeight:1.55, color:"rgba(255,255,255,0.72)" }}>
+                Set up a full 20-slot grid, click any driver to edit their race plan, and keep the entire setup state live until the race starts.
+              </div>
+              <div className="setup-flow">
+                <span className="setup-flow-pill">01 Create Lobby</span>
+                <span className="setup-flow-pill" style={{ background:"rgba(225,6,0,0.16)", borderColor:"rgba(225,6,0,0.28)", color:"#fff" }}>02 Setup</span>
+                <span className="setup-flow-pill">03 Confirm & Race</span>
               </div>
             </div>
 
@@ -1343,27 +1925,174 @@ function StrategySetupPanel({ raceState, onClose, onUpdatePlayer, onConfirmSetup
             </button>
           </div>
 
-          <div className="setup-grid">
-            {raceState.players.map((player) => (
-              <PlayerSetupCard
-                key={player.id}
-                player={player}
-                onUpdatePlayer={onUpdatePlayer}
-              />
-            ))}
+          <div className="setup-layout">
+            <div className="setup-column">
+              <div className="setup-card" style={{ marginBottom:18 }}>
+                <div className="setup-section-header" style={{ marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3, color:"#E10600", textTransform:"uppercase", marginBottom:8 }}>Circuit Info</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, lineHeight:1, color:"#fff" }}>SPA-FRANCORCHAMPS</div>
+                    <div className="setup-note">Belgian Grand Prix • 7.004 km • 19 turns • 44 laps</div>
+                  </div>
+                  <div className="setup-chip">High Speed</div>
+                </div>
+
+                <div style={{
+                  borderRadius:24,
+                  background:"linear-gradient(180deg, #ffffff 0%, #f3f4f8 100%)",
+                  border:"1px solid rgba(255,255,255,0.16)",
+                  boxShadow:"inset 0 1px 0 rgba(255,255,255,0.9), 0 18px 40px rgba(0,0,0,0.2)",
+                  padding:16,
+                }}>
+                  <img
+                    src={spaMapImageSrc}
+                    alt="Spa-Francorchamps track map"
+                    style={{
+                      width:"100%",
+                      height:"auto",
+                      display:"block",
+                      objectFit:"contain",
+                      background:"#fff",
+                      borderRadius:18,
+                      filter:"contrast(1.55) brightness(1.08) saturate(0.95) drop-shadow(0 14px 28px rgba(0,0,0,0.18))",
+                    }}
+                  />
+                </div>
+
+                <div className="setup-summary">
+                  <div className="setup-summary-card">
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:"#fff", lineHeight:1 }}>20</div>
+                    <div className="setup-note">Total grid slots</div>
+                  </div>
+                  <div className="setup-summary-card">
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:"#fff", lineHeight:1 }}>{activeCount}</div>
+                    <div className="setup-note">Active drivers</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="setup-card">
+                <div className="setup-section-header" style={{ marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3, color:"#E10600", textTransform:"uppercase", marginBottom:8 }}>Grid Lineup</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, lineHeight:1, color:"#fff" }}>Clickable Driver Slots</div>
+                  </div>
+                  <div className="setup-chip">20 Cards</div>
+                </div>
+                <div className="setup-lineup">
+                  {setup.drivers.map((driver) => (
+                    <DriverSlotCard
+                      key={driver.id}
+                      driver={driver}
+                      active={driver.id === setup.selectedDriverId}
+                      onSelect={onSelectDriver}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="setup-column">
+              <DriverSetupPanel driver={selectedDriver} onUpdateDriver={onUpdateDriver} />
+            </div>
+
+            <div className="setup-column">
+              <div className="setup-card">
+                <div className="setup-section-header" style={{ marginBottom:10 }}>
+                  <div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3, color:"#E10600", textTransform:"uppercase", marginBottom:8 }}>Race Config</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, lineHeight:1, color:"#fff" }}>Global Setup</div>
+                  </div>
+                  <div className="setup-chip">Live</div>
+                </div>
+
+                <div className="setup-race-config">
+                  <SetupSlider
+                    label="Laps"
+                    value={setup.race.laps}
+                    onChange={(value) => onUpdateRace({ laps: value })}
+                    minLabel="Sprint"
+                    maxLabel="Endurance"
+                    unit=""
+                    min={1}
+                    max={70}
+                    step={1}
+                  />
+
+                  <ChoiceRow
+                    label="Weather Strategy"
+                    value={setup.race.weatherStrategy}
+                    options={WEATHER_STRATEGY_OPTIONS}
+                    onChange={(value) => onUpdateRace({ weatherStrategy: value })}
+                  />
+
+                  <SetupSlider
+                    label="Safety Car Probability"
+                    value={setup.race.safetyCarProbability}
+                    onChange={(value) => onUpdateRace({ safetyCarProbability: value })}
+                    minLabel="Low"
+                    maxLabel="High"
+                    min={0}
+                    max={100}
+                    step={1}
+                  />
+
+                  <ChoiceRow
+                    label="Race Pace Mode"
+                    value={setup.race.paceMode}
+                    options={RACE_PACE_OPTIONS}
+                    onChange={(value) => onUpdateRace({ paceMode: value })}
+                  />
+
+                  <SetupToggle
+                    label="Bots"
+                    value={setup.race.bots}
+                    onToggle={onToggleBots}
+                    onLabel="On"
+                    offLabel="Off"
+                    description={setup.race.bots ? "Remaining slots are filled by AI drivers." : "Unused slots stay open for waiting players."}
+                  />
+
+                  <div className="setup-section">
+                    <div className="setup-section-header">
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:2.8, color:"rgba(255,255,255,0.58)", textTransform:"uppercase" }}>Setup Summary</div>
+                      <div className="setup-chip">{activeCount}/20 Active</div>
+                    </div>
+                    <div className="setup-summary">
+                      <div className="setup-summary-card">
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:"#fff" }}>{setup.race.weatherStrategy}</div>
+                        <div className="setup-note">Weather strategy</div>
+                      </div>
+                      <div className="setup-summary-card">
+                        <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:"#fff" }}>{setup.race.paceMode}</div>
+                        <div className="setup-note">Pace mode</div>
+                      </div>
+                    </div>
+                    <div className="setup-note" style={{ marginTop:12 }}>
+                      {setup.race.bots ? "Bots are filling the grid, so the race can start immediately when the setup is valid." : "Bots are off, so extra slots can remain open for additional human players."}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="setup-footer">
-            <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
-              <div className="setup-chip">Phase {raceState.racePhase}</div>
-              <div className="setup-chip">Drivers {raceState.players.length}</div>
-              <div className="setup-chip">Weather {raceState.weather.replace("_", " ")}</div>
-              <div className="setup-chip">Laps {raceState.totalLaps}</div>
+            <div style={{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"center" }}>
+              <div className="setup-chip">Step {setup.flowStep}/3</div>
+              <div className="setup-chip">Grid Slots 20</div>
+              <div className="setup-chip">Active {activeCount}</div>
+              <div className="setup-chip">Weather {setup.race.weatherStrategy}</div>
             </div>
 
-            <div style={{ display:"flex", gap:12, flexWrap:"wrap", justifyContent:"flex-end" }}>
-              <button type="button" className="cta-ghost" onClick={onClose}>Back</button>
-              <button type="button" className="cta-primary" onClick={onConfirmSetup}>Confirm Setup</button>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, minWidth:280, alignItems:"flex-end" }}>
+              {setupError && <div className="setup-error">{setupError}</div>}
+              <div style={{ display:"flex", gap:12, flexWrap:"wrap", justifyContent:"flex-end" }}>
+                <button type="button" className="cta-ghost" onClick={onClose}>Back</button>
+                <button type="button" className="cta-primary" onClick={onConfirmSetup} disabled={!canConfirm} style={{ opacity: canConfirm ? 1 : 0.45, cursor: canConfirm ? "pointer" : "not-allowed" }}>
+                  Confirm &amp; Race
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1372,8 +2101,409 @@ function StrategySetupPanel({ raceState, onClose, onUpdatePlayer, onConfirmSetup
   );
 }
 
-// ─── HERO / HOME SECTION ──────────────────────────────────────────────────────
-// (unchanged from original — just wraps the pit garage hero)
+// ─── POST-RACE RESULTS ───────────────────────────────────────────────────────
+function PostRaceResults({ raceState, onBackToLobby }) {
+  const sortedPlayers = raceState.players.slice().sort((a, b) => a.position - b.position);
+  const leader = sortedPlayers[0];
+  const setupDriversById = new Map((raceState.setup?.drivers || []).map((driver) => [driver.id, driver]));
+  const winner = sortedPlayers[0];
+  const fastestLap = sortedPlayers.reduce((best, driver) => {
+    if (!Number.isFinite(driver.currentLapTime)) {
+      return best;
+    }
+
+    if (!best || driver.currentLapTime < best.time) {
+      return { driver, time: driver.currentLapTime };
+    }
+
+    return best;
+  }, null);
+  const weatherLabel = String(raceState.weather).replace(/_/g, " ");
+  const driverOfTheDay = sortedPlayers.reduce((best, driver) => {
+    const startingSlot = setupDriversById.get(driver.id)?.slotIndex ?? driver.position;
+    const gainedPlaces = startingSlot - driver.position;
+    const paceBonus = fastestLap?.driver?.id === driver.id ? 1 : 0;
+    const strategyBonus = driver.pitCount === 1 ? 0.5 : 0;
+    const score = gainedPlaces * 3 + paceBonus + strategyBonus - (driver.position - 1) * 0.2;
+
+    if (!best || score > best.score) {
+      return { driver, score, startingSlot, gainedPlaces };
+    }
+
+    return best;
+  }, null);
+  const highlightItems = [
+    ...(fastestLap ? [{
+      id: `fastest-${fastestLap.driver.id}`,
+      lap: raceState.totalLaps,
+      title: "Fastest Lap",
+      detail: `${fastestLap.driver.name} set ${fastestLap.time.toFixed(3)}s`,
+      accent: "#b66dff",
+    }] : []),
+    ...raceState.events
+      .filter((event) => ["undercut", "overcut", "pit_stop", "weather_change"].includes(event.type))
+      .slice(-6)
+      .map((event) => ({
+        id: `${event.type}-${event.playerId}-${event.lap}`,
+        lap: event.lap,
+        title:
+          event.type === "pit_stop"
+            ? "Pit Stop"
+            : event.type === "undercut"
+              ? "Undercut"
+              : event.type === "overcut"
+                ? "Overcut"
+                : "Weather Change",
+        detail:
+          event.type === "weather_change"
+            ? `${String(event.title || event.to || "weather change").replace(/_/g, " ")} • lap ${event.lap}`
+            : `${sortedPlayers.find((driver) => driver.id === event.playerId)?.name || event.playerId} • lap ${event.lap}`,
+        accent:
+          event.type === "pit_stop"
+            ? "#f4c542"
+            : event.type === "undercut"
+              ? "#38c97a"
+              : event.type === "overcut"
+                ? "#59a8ff"
+                : "#6d7dff",
+      })),
+  ]
+    .sort((a, b) => b.lap - a.lap)
+    .slice(0, 5);
+
+  const metallicPanel = {
+    background: "linear-gradient(180deg, rgba(252,253,255,0.88) 0%, rgba(236,240,247,0.82) 100%)",
+    border: "1px solid rgba(255,255,255,0.72)",
+    boxShadow: "0 24px 52px rgba(15,22,34,0.12), inset 0 1px 0 rgba(255,255,255,0.96)",
+    backdropFilter: "blur(22px)",
+  };
+  const softLabel = {
+    fontWeight: 700,
+    fontSize: 10,
+    letterSpacing: 3,
+    color: "rgba(17,17,17,0.42)",
+    textTransform: "uppercase",
+  };
+  const cardShell = {
+    position: "relative",
+    overflow: "hidden",
+  };
+  const winnerTeamColor = winner ? (TEAMS[winner.team]?.color || "#E10600") : "#E10600";
+  const illustrationCards = [
+    { title: "Starting Grid", subtitle: winner?.name || "Winner", tone: "rgba(255,196,94,0.16)", width: 280, height: 164, top: 96, left: -36, rotate: -8 },
+    { title: "Race", subtitle: "Green Flag", tone: "rgba(28,210,124,0.18)", width: 250, height: 146, top: 132, right: 56, rotate: 7 },
+    { title: "Fastest Lap", subtitle: fastestLap ? fastestLap.driver.name : "Telemetry", tone: "rgba(177,80,255,0.16)", width: 236, height: 138, top: 390, right: -12, rotate: -9 },
+    { title: "Driver Of The Day", subtitle: driverOfTheDay?.driver?.name || "Race Star", tone: "rgba(255,139,52,0.14)", width: 300, height: 154, bottom: 126, left: 22, rotate: 8 },
+  ];
+  const infoGridColumns = "repeat(auto-fit, minmax(150px, 1fr))";
+  const lowerGridColumns = "repeat(auto-fit, minmax(320px, 1fr))";
+  const formatLapTime = (value) => (Number.isFinite(value) ? `${value.toFixed(3)}s` : "--");
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:400, background:`linear-gradient(180deg, rgba(241,244,249,0.97) 0%, rgba(221,226,236,0.95) 55%, rgba(204,211,223,0.97) 100%), url(${pitGarageImageSrc}) center/cover no-repeat`, backdropFilter:"blur(12px)", overflowY:"auto", fontFamily:"'Barlow Condensed',sans-serif" }}>
+      <div
+        style={{
+          position:"fixed",
+          inset:0,
+          pointerEvents:"none",
+          background:
+            "linear-gradient(180deg, rgba(255,118,70,0.12) 0%, rgba(255,255,255,0.04) 28%, rgba(255,255,255,0) 54%), radial-gradient(circle at 18% 14%, rgba(255,245,227,0.72) 0%, rgba(255,238,219,0.18) 18%, transparent 34%), radial-gradient(circle at 76% 16%, rgba(61,207,158,0.12) 0%, transparent 24%), radial-gradient(circle at 82% 72%, rgba(108,88,255,0.12) 0%, transparent 24%), radial-gradient(circle at 18% 82%, rgba(77,107,255,0.14) 0%, transparent 28%)",
+          filter:"blur(8px) saturate(1.04)",
+          opacity:0.88,
+        }}
+      />
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", background:"radial-gradient(circle at top left, rgba(225,6,0,0.08), transparent 24%), linear-gradient(90deg, rgba(255,255,255,0.42) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.34) 1px, transparent 1px)", backgroundSize:"auto, 56px 56px, 56px 56px", opacity:0.42 }} />
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:0 }}>
+        <div style={{ position:"absolute", inset:"8% 6%", borderRadius:42, border:"1px solid rgba(255,255,255,0.36)", boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.18)" }} />
+        <div style={{ position:"absolute", inset:"14% 0 auto 0", height:160, background:"repeating-linear-gradient(135deg, rgba(255,255,255,0.15) 0 14px, rgba(255,255,255,0) 14px 28px)", opacity:0.22, transform:"translateX(-14%) rotate(-4deg)" }} />
+        {illustrationCards.map((card) => (
+          <div
+            key={card.title}
+            style={{
+              position:"absolute",
+              width:card.width,
+              height:card.height,
+              top:card.top,
+              right:card.right,
+              bottom:card.bottom,
+              left:card.left,
+              borderRadius:28,
+              padding:"20px 22px",
+              background:`linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(237,241,248,0.58) 100%), ${card.tone}`,
+              border:"1px solid rgba(255,255,255,0.56)",
+              boxShadow:"0 18px 42px rgba(15,22,34,0.12), inset 0 1px 0 rgba(255,255,255,0.76)",
+              backdropFilter:"blur(16px)",
+              transform:`rotate(${card.rotate}deg)`,
+              opacity:0.62,
+            }}
+          >
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+              <div style={{ width:72, height:20, background:"linear-gradient(90deg, rgba(17,17,17,0.9) 0%, rgba(17,17,17,0.72) 82%, rgba(17,17,17,0) 100%)", clipPath:"polygon(0 0, 76% 0, 56% 100%, 0 100%)", borderRadius:4 }} />
+              <div style={{ fontWeight:700, fontSize:10, letterSpacing:2.6, color:"rgba(17,17,17,0.56)", textTransform:"uppercase" }}>Race</div>
+            </div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:card.title.length > 14 ? 26 : 34, lineHeight:0.94, letterSpacing:1.2, color:"#111" }}>{card.title}</div>
+            <div style={{ marginTop:10, fontWeight:600, fontSize:14, color:"rgba(17,17,17,0.46)", textTransform:"uppercase", letterSpacing:1.8 }}>{card.subtitle}</div>
+            <div style={{ position:"absolute", inset:"auto 18px 18px auto", width:82, height:82, borderRadius:"50%", background:"radial-gradient(circle, rgba(255,255,255,0.66) 0%, rgba(255,255,255,0) 72%)" }} />
+          </div>
+        ))}
+        <div style={{ position:"absolute", right:"6%", top:"10%", width:420, height:170, opacity:0.18, transform:"rotate(-7deg)" }}>
+          <div style={{ position:"absolute", inset:"48px 26px 46px 64px", borderRadius:999, background:"linear-gradient(90deg, rgba(18,18,18,0.18), rgba(18,18,18,0.08))", filter:"blur(2px)" }} />
+          <div style={{ position:"absolute", left:0, top:64, width:124, height:42, borderRadius:"28px 16px 20px 32px", background:"rgba(18,18,18,0.18)" }} />
+          <div style={{ position:"absolute", right:0, top:64, width:164, height:42, borderRadius:"16px 32px 32px 20px", background:"rgba(18,18,18,0.18)" }} />
+          <div style={{ position:"absolute", left:108, top:36, width:122, height:50, borderRadius:"28px 34px 20px 20px", background:"rgba(18,18,18,0.18)", transform:"skewX(-18deg)" }} />
+          <div style={{ position:"absolute", left:72, bottom:18, width:58, height:58, borderRadius:"50%", border:"11px solid rgba(18,18,18,0.2)" }} />
+          <div style={{ position:"absolute", right:76, bottom:18, width:58, height:58, borderRadius:"50%", border:"11px solid rgba(18,18,18,0.2)" }} />
+        </div>
+      </div>
+      <div style={{ maxWidth:1200, margin:"0 auto", padding:"56px 24px 60px", position:"relative", zIndex:1 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))", gap:24, alignItems:"stretch", marginBottom:34 }}>
+          <div style={{ ...metallicPanel, ...cardShell, borderRadius:34, padding:"32px 30px" }}>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:10, padding:"8px 14px", borderRadius:999, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.1)", marginBottom:18 }}>
+              <div style={{ width:18, height:18, background:"repeating-conic-gradient(from 45deg, #fff 0 25%, #111 0 50%)", backgroundSize:"12px 12px", borderRadius:4 }} />
+              <span style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase" }}>Race Complete</span>
+            </div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(56px,8vw,104px)", color:"#111", letterSpacing:2, lineHeight:0.88 }}>CHECKERED FLAG</div>
+            <div style={{ maxWidth:460, fontWeight:500, fontSize:16, color:"rgba(17,17,17,0.58)", lineHeight:1.35, marginTop:16 }}>
+              Premium end-of-race summary with broadcast-card energy, metallic glass surfaces, and a sharper finish worthy of the rest of the simulator.
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginTop:24 }}>
+              {[
+                "Spa-Francorchamps",
+                `${raceState.totalLaps} Laps`,
+                weatherLabel.toUpperCase(),
+                winner?.team || "Winner",
+              ].map((item) => (
+                <div key={item} style={{ padding:"10px 14px", borderRadius:999, background:"rgba(255,255,255,0.4)", border:"1px solid rgba(255,255,255,0.62)", color:"rgba(17,17,17,0.68)", fontWeight:700, fontSize:11, letterSpacing:2, textTransform:"uppercase" }}>
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ ...metallicPanel, ...cardShell, borderRadius:34, padding:"30px", background:`linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(237,241,248,0.84) 100%), radial-gradient(circle at top right, ${winnerTeamColor}18 0%, transparent 38%)` }}>
+            <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0) 30%)", pointerEvents:"none" }} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16, position:"relative" }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:10 }}>Winner Spotlight</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:56, color:"#111", lineHeight:0.9, letterSpacing:1.2 }}>{winner?.name || "--"}</div>
+                <div style={{ marginTop:10, fontWeight:700, fontSize:12, letterSpacing:2.2, color:"rgba(17,17,17,0.48)", textTransform:"uppercase" }}>{winner?.team || "Race Winner"}</div>
+              </div>
+              <div style={{ minWidth:86, height:86, borderRadius:22, background:`linear-gradient(180deg, ${winnerTeamColor} 0%, rgba(255,255,255,0.12) 220%)`, boxShadow:`0 16px 32px ${winnerTeamColor}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#fff" }}>
+                P1
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:infoGridColumns, gap:12, marginTop:22, position:"relative" }}>
+              {[
+                { label:"Race Time", value:winner ? `${winner.totalTime.toFixed(3)}s` : "--" },
+                { label:"Fastest Lap", value: fastestLap ? formatLapTime(fastestLap.time) : "--" },
+                { label:"Pit Stops", value:winner ? `${winner.pitCount}` : "--" },
+                { label:"Start", value:`P${setupDriversById.get(winner?.id)?.slotIndex ?? winner?.position ?? 1}` },
+              ].map((item) => (
+                <div key={item.label} style={{ padding:"14px 14px 12px", borderRadius:18, background:"rgba(255,255,255,0.44)", border:"1px solid rgba(255,255,255,0.64)" }}>
+                  <div style={softLabel}>{item.label}</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#111", lineHeight:1, marginTop:8, letterSpacing:1 }}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Podium */}
+        <div style={{ display:"flex", justifyContent:"center", gap:16, marginBottom:40, flexWrap:"wrap" }}>
+          {sortedPlayers.slice(0, 3).map((driver, i) => (
+            <div key={driver.id} style={{
+              ...metallicPanel,
+              ...cardShell,
+              flex:"1 1 220px", maxWidth:290, padding:"28px 22px", borderRadius:26,
+              background: i === 0 ? "linear-gradient(180deg, rgba(255,251,246,0.97) 0%, rgba(255,234,222,0.9) 100%)" : "linear-gradient(180deg, rgba(252,253,255,0.94) 0%, rgba(231,235,243,0.84) 100%)",
+              border: `1px solid ${i === 0 ? "rgba(255,145,77,0.22)" : "rgba(255,255,255,0.62)"}`,
+              textAlign:"center", transform: i === 0 ? "scale(1.05)" : "none",
+              boxShadow: i === 0 ? "0 28px 56px rgba(255,113,51,0.16), inset 0 1px 0 rgba(255,255,255,0.98)" : metallicPanel.boxShadow,
+            }}>
+              <div style={{ position:"absolute", inset:0, background:`radial-gradient(circle at top center, ${(TEAMS[driver.team]?.color || "#E10600")}24 0%, transparent 56%)`, pointerEvents:"none" }} />
+              <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:44, color: i === 0 ? "#E10600" : "rgba(17,17,17,0.22)", lineHeight:1 }}>P{i + 1}</div>
+              <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:"#111", letterSpacing:1, marginTop:8 }}>{driver.name}</div>
+              <div style={{ position:"relative", fontWeight:600, fontSize:11, letterSpacing:2, color:"rgba(17,17,17,0.46)", marginTop:6, textTransform:"uppercase" }}>
+                {driver.totalTime.toFixed(1)}s &bull; {driver.pitCount} stop{driver.pitCount !== 1 ? "s" : ""}
+              </div>
+              {!driver.isBot && <div style={{ position:"relative", marginTop:8, padding:"4px 10px", borderRadius:999, background:"rgba(225,6,0,0.1)", color:"#E10600", fontWeight:700, fontSize:10, letterSpacing:2, display:"inline-block" }}>YOU</div>}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...metallicPanel, ...cardShell, borderRadius:28, padding:"24px 26px", marginBottom:28 }}>
+          <div style={{ ...softLabel, marginBottom:16, color:"#ff8f6b" }}>Race Summary</div>
+          <div style={{ display:"grid", gridTemplateColumns:infoGridColumns, gap:16 }}>
+            {[
+              { label:"Winner", value:winner?.name || "--" },
+              { label:"Race Time", value:winner ? `${winner.totalTime.toFixed(3)}s` : "--" },
+              { label:"Fastest Lap", value:fastestLap ? `${fastestLap.driver.name} • ${fastestLap.time.toFixed(3)}s` : "--" },
+              { label:"Winner Stops", value:winner ? `${winner.pitCount}` : "--" },
+              { label:"Weather", value:weatherLabel },
+            ].map((item) => (
+              <div key={item.label} style={{ padding:"14px 16px", borderRadius:20, background:"rgba(255,255,255,0.4)", border:"1px solid rgba(255,255,255,0.62)" }}>
+                <div style={softLabel}>{item.label}</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:"#111", lineHeight:0.95, letterSpacing:1, marginTop:8 }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Classification */}
+        <div style={{ ...metallicPanel, borderRadius:28, overflow:"hidden", marginBottom:28 }}>
+          <div style={{ padding:"16px 22px", borderBottom:"1px solid rgba(17,17,17,0.08)" }}>
+            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:12 }}>Final Classification</div>
+            <div style={{ display:"grid", gridTemplateColumns:"70px 1.5fr 1fr 1fr 100px 90px 150px", gap:14, color:"rgba(17,17,17,0.42)", fontSize:10, fontWeight:700, letterSpacing:2.2, textTransform:"uppercase" }}>
+              <div>Pos</div>
+              <div>Driver</div>
+              <div>Gap</div>
+              <div>Best Lap</div>
+              <div>Pits</div>
+              <div>Tyre</div>
+              <div>Stint</div>
+            </div>
+          </div>
+          {sortedPlayers.map((driver) => {
+            const gap = driver.position === 1 ? "LEADER" : `+${(driver.totalTime - leader.totalTime).toFixed(1)}s`;
+            const bestLapLabel = fastestLap?.driver?.id === driver.id ? fastestLap.time.toFixed(3) : driver.currentLapTime.toFixed(3);
+            const stintLabel = (driver.stintHistory || [{ compound: driver.tyre }]).map((stint) => stint.compound).join(" → ");
+            return (
+              <div key={driver.id} style={{
+                display:"grid", gridTemplateColumns:"70px 1.5fr 1fr 1fr 100px 90px 150px",
+                alignItems:"center", gap:14, padding:"16px 22px",
+                borderBottom:"1px solid rgba(17,17,17,0.06)",
+                background: !driver.isBot ? "linear-gradient(90deg, rgba(225,6,0,0.08) 0%, rgba(255,255,255,0.28) 100%)" : "rgba(255,255,255,0.22)",
+                boxShadow: `inset 3px 0 0 ${driver.position === 1 ? "#ff8f6b" : driver.position === 2 ? "rgba(255,255,255,0.5)" : driver.position === 3 ? "#c58d56" : "transparent"}`,
+              }}>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"rgba(17,17,17,0.76)" }}>{driver.position}</div>
+                <div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#111", letterSpacing:1 }}>
+                    {driver.name} {!driver.isBot && <span style={{ color:"#E10600", fontSize:12 }}>&#9733;</span>}
+                  </div>
+                  <div style={{ fontWeight:600, fontSize:10, letterSpacing:2, color:"rgba(17,17,17,0.36)" }}>
+                    {driver.team || (driver.isBot ? "BOT" : "PLAYER")} • Grid {setupDriversById.get(driver.id)?.slotIndex ?? driver.position}
+                  </div>
+                </div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(17,17,17,0.62)" }}>{gap}</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:fastestLap?.driver?.id === driver.id ? "#9a51e0" : "rgba(17,17,17,0.82)" }}>{bestLapLabel}s</div>
+                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2, color:"rgba(17,17,17,0.56)", textTransform:"uppercase" }}>{driver.pitCount}</div>
+                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2, color:TYRE_COMPOUNDS[driver.tyre]?.color || "#111", textTransform:"uppercase" }}>{driver.tyre}</div>
+                <div style={{ fontWeight:700, fontSize:11, letterSpacing:1.4, color:"rgba(17,17,17,0.5)", textTransform:"uppercase" }}>{stintLabel}</div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Strategy Timeline */}
+        <div style={{ ...metallicPanel, borderRadius:28, padding:"22px", marginBottom:28 }}>
+          <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Strategy Timeline</div>
+          {sortedPlayers.map((driver) => {
+            const stints = driver.stintHistory || [{ compound: driver.tyre, startLap: 0 }];
+            return (
+              <div key={driver.id} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
+                <div style={{ width:120, fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color: !driver.isBot ? "#E10600" : "rgba(17,17,17,0.72)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{driver.name}</div>
+                <div style={{ flex:1, display:"flex", height:22, borderRadius:999, overflow:"hidden", background:"rgba(255,255,255,0.28)", border:"1px solid rgba(255,255,255,0.5)" }}>
+                  {stints.map((stint, i) => {
+                    const endLap = stint.endLap || raceState.totalLaps;
+                    const width = ((endLap - stint.startLap) / raceState.totalLaps) * 100;
+                    const tyreColor = TYRE_COMPOUNDS[stint.compound]?.color || "#888";
+                    return (
+                      <div key={i} style={{
+                        width:`${width}%`, background:`${tyreColor}44`,
+                        borderRight: i < stints.length - 1 ? "2px solid rgba(0,0,0,0.45)" : "none",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        fontFamily:"'Bebas Neue',sans-serif", fontSize:12, color:tyreColor, letterSpacing:1,
+                      }}>
+                        {width > 8 ? stint.compound : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, fontWeight:600, fontSize:9, letterSpacing:2, color:"rgba(17,17,17,0.28)" }}>
+            <span>LAP 0</span><span>LAP {raceState.totalLaps}</span>
+          </div>
+        </div>
+
+        <div style={{ display:"grid", gridTemplateColumns:lowerGridColumns, gap:24, marginBottom:28 }}>
+          <div style={{ ...metallicPanel, borderRadius:28, padding:"22px" }}>
+            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Race Highlights</div>
+            {highlightItems.length === 0 ? (
+              <div style={{ color:"rgba(17,17,17,0.46)", fontWeight:600, fontSize:14 }}>No major highlights recorded.</div>
+            ) : (
+              highlightItems.map((item, i) => (
+                <div key={item.id} style={{ display:"grid", gridTemplateColumns:"80px 1fr auto", gap:14, alignItems:"center", padding:"12px 0", borderTop: i > 0 ? "1px solid rgba(17,17,17,0.06)" : "none" }}>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(17,17,17,0.46)" }}>LAP {item.lap}</div>
+                  <div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#111", lineHeight:0.95 }}>{item.title}</div>
+                    <div style={{ marginTop:4, fontWeight:600, fontSize:13, color:"rgba(17,17,17,0.52)" }}>{item.detail}</div>
+                  </div>
+                  <div style={{ width:12, height:12, borderRadius:"50%", background:item.accent, boxShadow:`0 0 0 6px ${item.accent}22` }} />
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={{ ...metallicPanel, ...cardShell, borderRadius:28, padding:"22px", background:"linear-gradient(180deg, rgba(248,249,252,0.96) 0%, rgba(236,230,236,0.88) 100%)" }}>
+            <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at top right, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0) 42%)", pointerEvents:"none" }} />
+            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18, position:"relative" }}>Driver Of The Day</div>
+            {driverOfTheDay && (
+              <>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#111", lineHeight:0.92, marginBottom:10, position:"relative" }}>{driverOfTheDay.driver.name}</div>
+                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2.4, color:"rgba(17,17,17,0.46)", textTransform:"uppercase", marginBottom:18, position:"relative" }}>
+                  Grid {driverOfTheDay.startingSlot} → Finish P{driverOfTheDay.driver.position}
+                </div>
+                <div style={{ display:"grid", gap:12, position:"relative" }}>
+                  {[
+                    { label:"Places Gained", value: `${driverOfTheDay.gainedPlaces >= 0 ? "+" : ""}${driverOfTheDay.gainedPlaces}` },
+                    { label:"Pit Stops", value: `${driverOfTheDay.driver.pitCount}` },
+                    { label:"Final Time", value: `${driverOfTheDay.driver.totalTime.toFixed(3)}s` },
+                  ].map((item) => (
+                    <div key={item.label} style={{ padding:"12px 14px", borderRadius:18, background:"rgba(255,255,255,0.44)", border:"1px solid rgba(255,255,255,0.64)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+                      <div style={softLabel}>{item.label}</div>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#111", lineHeight:1 }}>{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Setup Impact Summary */}
+        <div style={{ ...metallicPanel, borderRadius:28, padding:"22px", marginBottom:32 }}>
+          <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Your Setup Impact</div>
+          {(() => {
+            const user = raceState.players.find(p => !p.isBot);
+            if (!user) return null;
+            const items = [
+              { label:"Starting Tyre", value:user.stintHistory?.[0]?.compound || "M", desc:"Your initial compound choice shaped early pace" },
+              { label:"Downforce", value:`${user.setup.downforce}%`, desc: user.setup.downforce > 60 ? "High grip in corners, slower on straights" : user.setup.downforce < 40 ? "Low drag on straights, less corner grip" : "Balanced aero package" },
+              { label:"Driving Style", value:user.drivingStyle, desc: user.drivingStyle === "aggressive" ? "Faster laps but higher tyre wear" : user.drivingStyle === "conservative" ? "Preserved tyres but slower pace" : "Even balance of pace and wear" },
+              { label:"Final Position", value:`P${user.position}`, desc:`Finished ${user.position === 1 ? "on top" : `${user.totalTime > leader.totalTime ? `+${(user.totalTime - leader.totalTime).toFixed(1)}s behind` : "as leader"}`}` },
+            ];
+            return items.map((item, i) => (
+              <div key={i} style={{ display:"flex", alignItems:"center", gap:16, padding:"12px 0", borderTop: i > 0 ? "1px solid rgba(17,17,17,0.06)" : "none", flexWrap:"wrap" }}>
+                <div style={{ minWidth:120, fontWeight:700, fontSize:11, letterSpacing:2, color:"rgba(17,17,17,0.42)", textTransform:"uppercase" }}>{item.label}</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#111", letterSpacing:1, minWidth:60 }}>{item.value}</div>
+                <div style={{ fontWeight:500, fontSize:12, color:"rgba(17,17,17,0.46)" }}>{item.desc}</div>
+              </div>
+            ));
+          })()}
+        </div>
+
+        <div style={{ textAlign:"center" }}>
+          <button type="button" onClick={onBackToLobby} style={{
+            padding:"16px 48px", borderRadius:16, border:"1px solid rgba(255,255,255,0.16)", background:"linear-gradient(180deg, #ff6a3d, #dd4e24)", color:"#fff",
+            boxShadow:"0 18px 32px rgba(255,104,58,0.22), inset 0 1px 0 rgba(255,255,255,0.22)", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:14, letterSpacing:3, textTransform:"uppercase", cursor:"pointer",
+          }}>Back to Lobby</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── MAIN LANDING PAGE EXPORT ─────────────────────────────────────────────────
 export function LandingPage({
@@ -1382,81 +2512,304 @@ export function LandingPage({
   pitGarageSrc = pitGarageImageSrc,
   f1LogoSrc = f1LogoImageSrc,
 }) {
-  const [raceState, setRaceState] = useState(createInitialRaceState);
+  const [raceState, setRaceState] = useState(() => createInitialRaceState());
   const [activeSection, setActiveSection] = useState("home");
+  const [showResults, setShowResults] = useState(false);
+  const [botsEnabled, setBotsEnabled] = useState(true);
+  const [setupError, setSetupError] = useState("");
+  const [weatherBanner, setWeatherBanner] = useState(null);
+  const [startLightsCount, setStartLightsCount] = useState(0);
+  const [startLightsVisible, setStartLightsVisible] = useState(false);
+  const [startLightsGo, setStartLightsGo] = useState(false);
+  const [finishTransitionVisible, setFinishTransitionVisible] = useState(false);
+  const prevRacePhaseRef = useRef(null);
+
+  // ── LOBBY STATE ──
+  const [lobby, setLobby] = useState(null);
+  const [screen, setScreen] = useState("landing"); // "landing" | "lobby-room"
+
+  // Create lobby form
+  const [showCreate, setShowCreate] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createUsername, setCreateUsername] = useState("");
+  const [createError, setCreateError] = useState("");
+
+  // Join lobby form
   const [showJoin, setShowJoin] = useState(false);
-  const [joinCode, setJoinCode] = useState("");
+  const [joinLobbyName, setJoinLobbyName] = useState("");
+  const [joinPassword, setJoinPassword] = useState("");
+  const [joinUsername, setJoinUsername] = useState("");
   const [joinError, setJoinError] = useState("");
   const { playbackProgress } = useRaceController(raceState, setRaceState);
   const { requestPit, selectPitTyre } = usePitSystem(setRaceState);
+  const finishWinner = raceState.players.slice().sort((a, b) => a.position - b.position)[0];
+  const finishWinnerLabel = finishWinner ? `Winner ${finishWinner.name}` : "Winner Pending";
+
+  const syncSetupState = (previousState, nextSetup) => ({
+    ...previousState,
+    setup: nextSetup,
+    players: buildActivePlayersFromSetup(nextSetup),
+    totalLaps: nextSetup.race.laps,
+    weather: WEATHER_TO_RACE_WEATHER[nextSetup.race.weatherStrategy] || "dry",
+  });
+
+  const rebuildSetupDriversForBots = (drivers, includeBots) => {
+    const humanCount = drivers.filter((driver) => driver.type === "player").length || 1;
+
+    return drivers.map((driver, index) => {
+      if (driver.type === "player") {
+        return driver;
+      }
+
+      if (!includeBots) {
+        return {
+          ...driver,
+          type: "waiting",
+          status: "Waiting",
+        };
+      }
+
+      const profile = AI_DRIVER_POOL[(index - humanCount + AI_DRIVER_POOL.length) % AI_DRIVER_POOL.length];
+      return {
+        ...driver,
+        id: driver.type === "waiting" ? profile.id : driver.id,
+        name: driver.type === "waiting" ? profile.name : driver.name,
+        team: driver.type === "waiting" ? profile.team : driver.team,
+        teamColor: driver.type === "waiting" ? (TEAMS[profile.team]?.color || driver.teamColor) : driver.teamColor,
+        type: "ai",
+        status: "AI",
+        tyre: driver.tyre ?? profile.tyre,
+        fuel: driver.fuel ?? profile.fuel,
+        drivingStyle: driver.drivingStyle ?? profile.drivingStyle,
+        ers: driver.ers ?? profile.ers,
+        pitStrategy: driver.pitStrategy ?? profile.pitStrategy,
+      };
+    });
+  };
 
   const handleOpenSetup = () => {
-    setRaceState((previousState) => syncRaceStateCalculations({
+    setSetupError("");
+    setRaceState((previousState) => ({
       ...previousState,
       racePhase: "setup",
-      players: previousState.players.map((player) => ({
-        ...player,
-        setupLocked: false,
-      })),
+      setup: {
+        ...previousState.setup,
+        race: {
+          ...previousState.setup?.race,
+          bots: botsEnabled,
+        },
+      },
     }));
     setActiveSection("home");
   };
 
   const handleCloseSetup = () => {
+    setSetupError("");
     setRaceState((previousState) => ({
       ...previousState,
       racePhase: "lobby",
     }));
   };
 
-  const handlePlayerSetupChange = (playerId, updates) => {
-    setRaceState((previousState) => syncRaceStateCalculations({
+  const handleSelectDriver = (driverId) => {
+    setRaceState((previousState) => ({
       ...previousState,
-      players: previousState.players.map((player) => {
-        if (player.id !== playerId || player.setupLocked) {
-          return player;
-        }
-
-        return {
-          ...player,
-          ...updates,
-          setup: {
-            ...player.setup,
-            ...(updates.setup ?? {}),
-          },
-        };
-      }),
+      setup: {
+        ...previousState.setup,
+        selectedDriverId: driverId,
+      },
     }));
   };
 
-  const handleConfirmSetup = () => {
-    let nextRaceState;
-
+  const handleUpdateDriver = (driverId, updates) => {
     setRaceState((previousState) => {
-      nextRaceState = syncRaceStateCalculations({
-        ...previousState,
+      const nextSetup = {
+        ...previousState.setup,
+        drivers: previousState.setup.drivers.map((driver) => (
+          driver.id === driverId ? { ...driver, ...updates } : driver
+        )),
+      };
+
+      if (nextSetup.selectedDriverId !== driverId && nextSetup.selectedDriverId == null) {
+        nextSetup.selectedDriverId = driverId;
+      }
+
+      return syncSetupState(previousState, nextSetup);
+    });
+  };
+
+  const handleUpdateRace = (updates) => {
+    setRaceState((previousState) => {
+      const nextSetup = {
+        ...previousState.setup,
+        race: {
+          ...previousState.setup.race,
+          ...updates,
+        },
+      };
+
+      return syncSetupState(previousState, nextSetup);
+    });
+  };
+
+  const handleConfirmSetup = () => {
+    setRaceState((previousState) => {
+      const setup = previousState.setup || buildSetupState();
+      const activeDrivers = setup.drivers.filter((driver) => driver.type !== "waiting");
+      const hasValidTyreFuel = activeDrivers.length > 0 && activeDrivers.every((driver) => driver.tyre && driver.fuel !== null && driver.fuel !== undefined);
+
+      if (!hasValidTyreFuel) {
+        setSetupError("At least one driver needs tyre compound and fuel assigned.");
+        return previousState;
+      }
+
+      setSetupError("");
+      setShowResults(false);
+
+      return syncRaceStateCalculations({
+        ...syncSetupState(previousState, setup),
         racePhase: "racing",
-        players: previousState.players.map((player) => ({
+        players: buildActivePlayersFromSetup(setup).map((player) => ({
           ...player,
           setupLocked: true,
         })),
+        weather: WEATHER_TO_RACE_WEATHER[setup.race.weatherStrategy] || "dry",
+        totalLaps: setup.race.laps,
       });
-
-      return nextRaceState;
     });
-
-    if (typeof onCreateRoom === "function") {
-      onCreateRoom(nextRaceState);
-    }
   };
 
-  const handleJoin = () => {
-    const clean = joinCode.trim().toUpperCase();
-    if (clean.length < 4) { setJoinError("Enter a valid room code"); return; }
-    if (typeof onJoinRoom === "function") {
-      onJoinRoom(clean);
-    }
+  const handleStartSetup = () => {
+    const username = lobby?.players?.[0]?.username || "Player";
+    const newState = createInitialRaceState(username, botsEnabled, lobby?.players || []);
+    setRaceState({
+      ...newState,
+      racePhase: "setup",
+      setup: {
+        ...newState.setup,
+        race: {
+          ...newState.setup.race,
+          bots: botsEnabled,
+        },
+      },
+      players: buildActivePlayersFromSetup({
+        ...newState.setup,
+        race: {
+          ...newState.setup.race,
+          bots: botsEnabled,
+        },
+      }),
+    });
+    setSetupError("");
+    setScreen("landing");
   };
+
+  const handleBackToLobby = () => {
+    setShowResults(false);
+    const username = lobby?.players?.[0]?.username || "Player";
+    setRaceState(createInitialRaceState(username, botsEnabled, lobby?.players || []));
+    setSetupError("");
+    setScreen(lobby ? "lobby-room" : "landing");
+  };
+
+  const handleCreateLobby = () => {
+    if (!createName.trim()) { setCreateError("Enter a lobby name"); return; }
+    if (!createPassword.trim()) { setCreateError("Enter a password"); return; }
+    if (!createUsername.trim()) { setCreateError("Enter your username"); return; }
+    setLobby({
+      name: createName.trim(),
+      password: createPassword.trim(),
+      players: [{ username: createUsername.trim(), isHost: true }],
+    });
+    setShowCreate(false);
+    setCreateName(""); setCreatePassword(""); setCreateUsername(""); setCreateError("");
+    setScreen("lobby-room");
+  };
+
+  const handleJoinLobby = () => {
+    if (!joinLobbyName.trim()) { setJoinError("Enter lobby name"); return; }
+    if (!joinPassword.trim()) { setJoinError("Enter password"); return; }
+    if (!joinUsername.trim()) { setJoinError("Enter your username"); return; }
+    if (!lobby || lobby.name !== joinLobbyName.trim()) { setJoinError("Lobby not found"); return; }
+    if (lobby.password !== joinPassword.trim()) { setJoinError("Incorrect password"); return; }
+    setLobby(prev => ({ ...prev, players: [...prev.players, { username: joinUsername.trim(), isHost: false }] }));
+    setShowJoin(false);
+    setJoinLobbyName(""); setJoinPassword(""); setJoinUsername(""); setJoinError("");
+    setScreen("lobby-room");
+  };
+
+  // Finish sequence and delayed results reveal
+  useEffect(() => {
+    if (raceState.racePhase === "finished") {
+      setFinishTransitionVisible(true);
+      setShowResults(false);
+      const revealTimer = setTimeout(() => setShowResults(true), 1850);
+      const hideTimer = setTimeout(() => setFinishTransitionVisible(false), 2350);
+      return () => {
+        clearTimeout(revealTimer);
+        clearTimeout(hideTimer);
+      };
+    }
+
+    setFinishTransitionVisible(false);
+    setShowResults(false);
+    return undefined;
+  }, [raceState.racePhase]);
+
+  useEffect(() => {
+    if (raceState.racePhase !== "racing") {
+      setWeatherBanner(null);
+      return undefined;
+    }
+
+    const latestWeatherEvent = [...raceState.events]
+      .reverse()
+      .find((event) => event.type === "weather_change");
+
+    if (!latestWeatherEvent || weatherBanner?.id === latestWeatherEvent.timestamp) {
+      return undefined;
+    }
+
+    const nextBanner = {
+      id: latestWeatherEvent.timestamp,
+      text:
+        latestWeatherEvent.title ||
+        (latestWeatherEvent.to === "dry"
+          ? "TRACK DRYING"
+          : `${String(latestWeatherEvent.to).replace(/_/g, " ").toUpperCase()} STARTED`),
+      weather: latestWeatherEvent.to,
+      lap: latestWeatherEvent.lap,
+    };
+
+    setWeatherBanner(nextBanner);
+    const timer = window.setTimeout(() => {
+      setWeatherBanner((current) => (current?.id === nextBanner.id ? null : current));
+    }, 2400);
+
+    return () => window.clearTimeout(timer);
+  }, [raceState.events, raceState.racePhase, weatherBanner]);
+
+  useEffect(() => {
+    if (prevRacePhaseRef.current !== "racing" && raceState.racePhase === "racing") {
+      setStartLightsVisible(true);
+      setStartLightsCount(0);
+      setStartLightsGo(false);
+      const timers = [
+        setTimeout(() => setStartLightsCount(1), 350),
+        setTimeout(() => setStartLightsCount(2), 800),
+        setTimeout(() => setStartLightsCount(3), 1250),
+        setTimeout(() => setStartLightsCount(4), 1700),
+        setTimeout(() => setStartLightsCount(5), 2150),
+        setTimeout(() => setStartLightsCount(0), 3100),
+        setTimeout(() => setStartLightsGo(true), 3400),
+        setTimeout(() => { setStartLightsVisible(false); setStartLightsGo(false); }, 4900),
+      ];
+      prevRacePhaseRef.current = raceState.racePhase;
+      return () => timers.forEach(clearTimeout);
+    }
+    prevRacePhaseRef.current = raceState.racePhase;
+  }, [raceState.racePhase]);
 
   const sections = ["How It Works", "Guide", "Features", "About"];
   const sectionKey = s => s.toLowerCase().replace(/\s+/g, "-");
@@ -1467,50 +2820,191 @@ export function LandingPage({
       <style>{LANDING_STYLES}</style>
 
       {/* ── NAV ── */}
-      <nav style={{
-        position:"absolute", top:0, left:0, right:0, zIndex:50,
-        height:86, display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"0 34px",
-        margin:"18px 22px 0",
-        borderRadius:24,
-        background:"linear-gradient(180deg, rgba(145,151,162,0.7) 0%, rgba(90,96,107,0.46) 100%)",
-        border:"1px solid rgba(255,255,255,0.2)",
-        boxShadow:"0 18px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
-        backdropFilter:"blur(22px)",
-      }}>
-        {/* Logo */}
-        <div style={{ display:"flex", alignItems:"center", gap:14, cursor:"pointer" }} onClick={() => setActiveSection("home")}>
-          {f1LogoSrc && <img src={f1LogoSrc} alt="F1" style={{ height:44, width:"auto", filter:"drop-shadow(0 6px 14px rgba(225,6,0,0.22))" }} />}
-          <div style={{ width:1, height:28, background:"rgba(255,255,255,0.24)" }} />
-          <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:15, letterSpacing:4.8, color:"rgba(255,255,255,0.9)", textTransform:"uppercase" }}>Race Simulator</span>
-        </div>
+      {!isRaceVisualActive && (
+        <nav style={{
+          position:"absolute", top:0, left:0, right:0, zIndex:50,
+          height:86, display:"flex", alignItems:"center", justifyContent:"space-between",
+          padding:"0 34px",
+          margin:"18px 22px 0",
+          borderRadius:24,
+          background:"linear-gradient(180deg, rgba(145,151,162,0.7) 0%, rgba(90,96,107,0.46) 100%)",
+          border:"1px solid rgba(255,255,255,0.2)",
+          boxShadow:"0 18px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
+          backdropFilter:"blur(22px)",
+        }}>
+          <div style={{ display:"flex", alignItems:"center", gap:14, cursor:"pointer" }} onClick={() => setActiveSection("home")}>
+            {f1LogoSrc && <img src={f1LogoSrc} alt="F1" style={{ height:44, width:"auto", filter:"drop-shadow(0 6px 14px rgba(225,6,0,0.22))" }} />}
+            <div style={{ width:1, height:28, background:"rgba(255,255,255,0.24)" }} />
+            <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:15, letterSpacing:4.8, color:"rgba(255,255,255,0.9)", textTransform:"uppercase" }}>Race Simulator</span>
+          </div>
 
-        {/* Nav links */}
-        <div style={{ display:"flex", alignItems:"center", gap:36 }}>
-          {sections.map(item => (
-            <span
-              key={item}
-              className={`nav-link${activeSection === sectionKey(item) ? " active" : ""}`}
-              onClick={() => setActiveSection(sectionKey(item))}
-            >{item}</span>
-          ))}
-        </div>
-
-      </nav>
+          <div style={{ display:"flex", alignItems:"center", gap:36 }}>
+            {sections.map(item => (
+              <span
+                key={item}
+                className={`nav-link${activeSection === sectionKey(item) ? " active" : ""}`}
+                onClick={() => setActiveSection(sectionKey(item))}
+              >{item}</span>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {/* ── SECTIONS CONTAINER ── */}
       <div style={{ position:"relative", width:"100%", height:"100vh", overflow:"hidden" }}>
 
         {isRaceVisualActive && (
-          <div style={{ position:"absolute", inset:0, padding:"122px 28px 28px", animation:"fadeIn 0.35s ease" }}>
-            <div style={{ position:"relative", width:"100%", height:"100%" }}>
+          <div
+            style={{
+              position:"absolute",
+              inset:0,
+              padding:"18px",
+              animation:"raceScreenIn 0.5s cubic-bezier(0.22,1,0.36,1) both",
+              background:`linear-gradient(180deg, rgba(200,205,214,0.97) 0%, rgba(172,178,188,0.95) 100%), url(${pitGarageSrc}) center/cover no-repeat`,
+            }}
+          >
+            {/* Landing-page style grid overlay */}
+            <div style={{ position:"absolute", inset:0, backgroundImage:"linear-gradient(90deg, rgba(255,255,255,0.52) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.42) 1px, transparent 1px)", backgroundSize:"56px 56px", pointerEvents:"none" }} />
+            {/* Red accent top-left glow */}
+            <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at top left, rgba(225,6,0,0.09), transparent 36%)", pointerEvents:"none" }} />
+
+            <div style={{ position:"relative", width:"100%", height:"100%", zIndex:1 }}>
               <TrackView raceState={raceState} playbackProgress={raceState.racePhase === "finished" ? 1 : playbackProgress} />
+
+              {/* Weather banner — light theme */}
+              {weatherBanner && raceState.racePhase === "racing" && (
+                <div
+                  style={{
+                    position:"absolute",
+                    top:152,
+                    left:"50%",
+                    transform:"translateX(-50%)",
+                    zIndex:9,
+                    padding:"13px 24px 12px",
+                    borderRadius:22,
+                    background:"linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(244,246,250,0.9) 100%)",
+                    border:`1px solid ${weatherBanner.weather === "heavy_rain" ? "rgba(45,126,247,0.28)" : weatherBanner.weather === "light_rain" ? "rgba(67,209,127,0.26)" : "rgba(0,0,0,0.1)"}`,
+                    boxShadow:"0 18px 44px rgba(0,0,0,0.13), inset 0 1px 0 rgba(255,255,255,0.95)",
+                    backdropFilter:"blur(20px)",
+                    textAlign:"center",
+                    pointerEvents:"none",
+                    minWidth:260,
+                    animation:"weatherIn 0.45s cubic-bezier(0.22,1,0.36,1) both",
+                  }}
+                >
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3.2, color:"#E10600", textTransform:"uppercase", marginBottom:5 }}>
+                    Race Control · Lap {weatherBanner.lap}
+                  </div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, lineHeight:0.95, letterSpacing:1.4, color:"#111" }}>
+                    {weatherBanner.text}
+                  </div>
+                </div>
+              )}
+
               <RaceHUD
                 raceState={raceState}
-                playbackProgress={playbackProgress}
                 onRequestPit={requestPit}
                 onSelectTyre={selectPitTyre}
               />
+
+              {/* F1 start lights sequence */}
+              {startLightsVisible && (
+                <div style={{
+                  position:"absolute", inset:0, zIndex:200,
+                  display:"flex", alignItems:"center", justifyContent:"center",
+                  pointerEvents:"none",
+                  background:startLightsGo ? "transparent" : "rgba(10,12,16,0.55)",
+                  backdropFilter:startLightsGo ? "none" : "blur(5px)",
+                  transition:"background 0.45s ease, backdrop-filter 0.45s ease",
+                }}>
+                  {!startLightsGo ? (
+                    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:24, animation:"fadeIn 0.4s ease" }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:11, letterSpacing:5.5, color:"rgba(255,255,255,0.42)", textTransform:"uppercase" }}>
+                        Lights Out And Away We Go
+                      </div>
+                      <div style={{
+                        display:"flex", gap:14,
+                        padding:"22px 30px",
+                        borderRadius:22,
+                        background:"rgba(6,7,9,0.94)",
+                        border:"1px solid rgba(255,255,255,0.06)",
+                        boxShadow:"0 48px 100px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05)",
+                      }}>
+                        {[1,2,3,4,5].map(i => (
+                          <div key={i} style={{
+                            width:54, height:54, borderRadius:12,
+                            background:startLightsCount >= i ? "#E10600" : "rgba(48,0,0,0.6)",
+                            border:`2px solid ${startLightsCount >= i ? "rgba(255,110,110,0.5)" : "rgba(80,0,0,0.4)"}`,
+                            boxShadow:startLightsCount >= i
+                              ? "0 0 22px rgba(225,6,0,0.9), 0 0 54px rgba(225,6,0,0.45), inset 0 1px 0 rgba(255,200,200,0.22)"
+                              : "inset 0 1px 0 rgba(255,255,255,0.03)",
+                            transition:"background 0.1s ease, box-shadow 0.28s ease, border-color 0.12s ease",
+                            animation:startLightsCount >= i ? "startLightOn 0.22s cubic-bezier(0.22,1,0.36,1)" : "none",
+                          }} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      position:"absolute", left:"50%", top:"50%",
+                      fontFamily:"'Bebas Neue',sans-serif",
+                      fontSize:"114px", lineHeight:1, letterSpacing:"0.08em",
+                      color:"#fff",
+                      textShadow:"0 0 40px rgba(225,6,0,0.95), 0 0 80px rgba(225,6,0,0.55), 0 0 120px rgba(225,6,0,0.22)",
+                      animation:"goFlash 1.45s cubic-bezier(0.22,1,0.36,1) both",
+                      whiteSpace:"nowrap", userSelect:"none",
+                    }}>GO</div>
+                  )}
+                </div>
+              )}
+
+              {finishTransitionVisible && raceState.racePhase === "finished" && (
+                <div style={{
+                  position:"absolute",
+                  inset:0,
+                  zIndex:220,
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  pointerEvents:"none",
+                  background:"linear-gradient(180deg, rgba(235,239,246,0.28) 0%, rgba(214,221,233,0.52) 48%, rgba(232,237,245,0.78) 100%)",
+                  backdropFilter:"blur(10px)",
+                  animation:"fadeIn 0.3s ease",
+                }}>
+                  <div style={{
+                    position:"relative",
+                    width:"min(760px, calc(100vw - 56px))",
+                    padding:"34px 34px 30px",
+                    borderRadius:34,
+                    background:"linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(237,241,248,0.86) 100%)",
+                    border:"1px solid rgba(255,255,255,0.72)",
+                    boxShadow:"0 28px 72px rgba(15,22,34,0.16), inset 0 1px 0 rgba(255,255,255,0.98)",
+                    overflow:"hidden",
+                    textAlign:"center",
+                    animation:"raceScreenIn 0.55s cubic-bezier(0.22,1,0.36,1) both",
+                  }}>
+                    <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg, rgba(255,255,255,0.48) 0%, transparent 34%, transparent 72%, rgba(225,6,0,0.05) 100%)", pointerEvents:"none" }} />
+                    <div style={{ position:"absolute", top:0, left:0, right:0, height:84, background:"repeating-linear-gradient(135deg, rgba(17,17,17,0.08) 0 14px, rgba(255,255,255,0) 14px 28px)", opacity:0.3 }} />
+                    <div style={{ display:"inline-flex", alignItems:"center", gap:10, padding:"8px 14px", borderRadius:999, background:"rgba(255,255,255,0.54)", border:"1px solid rgba(255,255,255,0.7)", position:"relative", zIndex:1 }}>
+                      <div style={{ width:18, height:18, background:"repeating-conic-gradient(from 45deg, #fff 0 25%, #111 0 50%)", backgroundSize:"12px 12px", borderRadius:4 }} />
+                      <span style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#E10600", textTransform:"uppercase" }}>Session Complete</span>
+                    </div>
+                    <div style={{ position:"relative", zIndex:1, fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(72px,10vw,136px)", lineHeight:0.86, letterSpacing:"0.05em", color:"#111", marginTop:18 }}>
+                      RACE ENDED
+                    </div>
+                    <div style={{ position:"relative", zIndex:1, marginTop:12, fontWeight:600, fontSize:14, letterSpacing:3, color:"rgba(17,17,17,0.5)", textTransform:"uppercase" }}>
+                      Checkered flag • {raceState.totalLaps} laps complete • Results incoming
+                    </div>
+                    <div style={{ position:"relative", zIndex:1, display:"flex", justifyContent:"center", gap:10, marginTop:22, flexWrap:"wrap" }}>
+                      {["Race Control", finishWinnerLabel, "Broadcast Feed Locked"].map((item) => (
+                        <div key={item} style={{ padding:"10px 14px", borderRadius:999, background:"rgba(255,255,255,0.48)", border:"1px solid rgba(255,255,255,0.68)", color:"rgba(17,17,17,0.68)", fontWeight:700, fontSize:11, letterSpacing:2, textTransform:"uppercase" }}>
+                          {item}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1541,7 +3035,6 @@ export function LandingPage({
                 <div style={{ position:"absolute", inset:0, borderRadius:26, background:"linear-gradient(135deg, rgba(255,255,255,0.14), transparent 42%, transparent 70%, rgba(225,6,0,0.06))", pointerEvents:"none" }} />
                 <div style={{ position:"absolute", left:16, right:16, top:9, height:1, background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.36), transparent)", pointerEvents:"none" }} />
                 <div style={{ position:"absolute", left:18, right:18, bottom:9, height:1, background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)", pointerEvents:"none" }} />
-                <div className="hero-center-title">OUTSMART THE GRID</div>
               </div>
             </div>
 
@@ -1553,7 +3046,7 @@ export function LandingPage({
                   <div className="hero-action-sub">Enter Existing Room</div>
                 </div>
               </div>
-              <div className="hero-action primary" onClick={handleOpenSetup}>
+              <div className="hero-action primary" onClick={() => setShowCreate(true)}>
                 <div className="hero-action-icon">GO</div>
                 <div className="hero-action-copy">
                   <div className="hero-action-title">CREATE</div>
@@ -1572,7 +3065,7 @@ export function LandingPage({
             </div>
 
             {/* CREATE */}
-            <div onClick={handleOpenSetup} style={{ position:"absolute", bottom:56, right:52, textAlign:"right", cursor:"pointer", animation:"fadeInUp 0.7s ease 0.45s both", zIndex:3 }}>
+            <div onClick={() => setShowCreate(true)} style={{ position:"absolute", bottom:56, right:52, textAlign:"right", cursor:"pointer", animation:"fadeInUp 0.7s ease 0.45s both", zIndex:3 }}>
               <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(46px,6vw,84px)", color:"#fff", lineHeight:0.9, letterSpacing:"0.04em", transition:"color 0.2s, transform 0.2s", textShadow:"0 12px 28px rgba(0,0,0,0.24)" }}
                 onMouseEnter={e => e.currentTarget.style.color="#E10600"}
                 onMouseLeave={e => e.currentTarget.style.color="#fff"}
@@ -1580,15 +3073,6 @@ export function LandingPage({
               <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:"clamp(12px,1.4vw,18px)", color:"rgba(255,255,255,0.58)", letterSpacing:4, marginTop:8 }}>ROOM</div>
             </div>
 
-            {/* Bottom links */}
-            <div style={{ position:"absolute", bottom:22, left:0, right:0, display:"flex", justifyContent:"center", gap:48, animation:"fadeIn 0.8s ease 0.7s both", zIndex:3 }}>
-              {["Standings","Latest News","Latest Videos","Timings"].map(l => (
-                <span key={l} style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:3, color:"rgba(255,255,255,0.42)", cursor:"pointer", textTransform:"uppercase", transition:"color 0.15s, transform 0.15s" }}
-                  onMouseEnter={e => e.currentTarget.style.color="rgba(255,255,255,0.7)"}
-                  onMouseLeave={e => e.currentTarget.style.color="rgba(255,255,255,0.35)"}
-                >{l} →</span>
-              ))}
-            </div>
           </div>
         )}
 
@@ -1625,39 +3109,240 @@ export function LandingPage({
         <StrategySetupPanel
           raceState={raceState}
           onClose={handleCloseSetup}
-          onUpdatePlayer={handlePlayerSetupChange}
+          onSelectDriver={handleSelectDriver}
+          onUpdateDriver={handleUpdateDriver}
+          onUpdateRace={handleUpdateRace}
           onConfirmSetup={handleConfirmSetup}
+          onToggleBots={(val) => {
+            setBotsEnabled(val);
+            setSetupError("");
+            setRaceState((previousState) => {
+              const nextSetup = {
+                ...(previousState.setup || buildSetupState()),
+                race: {
+                  ...(previousState.setup?.race || DEFAULT_SETUP_RACE),
+                  bots: val,
+                },
+                drivers: rebuildSetupDriversForBots(previousState.setup?.drivers || buildSetupState().drivers, val),
+              };
+
+              return syncSetupState(previousState, nextSetup);
+            });
+          }}
+          setupError={setupError}
         />
       )}
 
-      {/* ── JOIN MODAL ── */}
+      {showResults && raceState.racePhase === "finished" && (
+        <PostRaceResults raceState={raceState} onBackToLobby={handleBackToLobby} />
+      )}
+
+      {/* ── CREATE LOBBY MODAL ── */}
+      {showCreate && (
+        <div
+          style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.8)", backdropFilter:"blur(8px)", display:"flex", alignItems:"center", justifyContent:"center", animation:"fadeIn 0.2s ease" }}
+          onClick={() => { setShowCreate(false); setCreateError(""); setCreateName(""); setCreatePassword(""); setCreateUsername(""); }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ position:"relative", background:"#111", border:"1px solid rgba(255,255,255,0.1)", borderRadius:16, padding:"36px 40px", width:"min(440px,92vw)", animation:"slideUp 0.3s ease" }}>
+            <button
+              onClick={() => { setShowCreate(false); setCreateError(""); setCreateName(""); setCreatePassword(""); setCreateUsername(""); }}
+              style={{ position:"absolute", top:16, right:16, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", color:"rgba(255,255,255,0.5)", fontSize:16, lineHeight:1, transition:"all 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.background="rgba(255,255,255,0.12)"; e.currentTarget.style.color="#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background="rgba(255,255,255,0.06)"; e.currentTarget.style.color="rgba(255,255,255,0.5)"; }}
+            >✕</button>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:3, color:"#E10600", marginBottom:6 }}>MULTIPLAYER</div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:36, color:"#fff", marginBottom:24, letterSpacing:1 }}>Create Lobby</div>
+
+            {[
+              { label:"LOBBY NAME", value:createName, set:setCreateName, placeholder:"e.g.  Monaco GP" },
+              { label:"PASSWORD",   value:createPassword, set:setCreatePassword, placeholder:"••••••••", type:"password" },
+              { label:"YOUR NAME",  value:createUsername, set:setCreateUsername, placeholder:"e.g.  Hamilton" },
+            ].map(({ label, value, set, placeholder, type }) => (
+              <div key={label} style={{ marginBottom:14 }}>
+                <div style={{ marginBottom:6, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:11, letterSpacing:2, color:"rgba(255,255,255,0.4)" }}>{label}</div>
+                <input
+                  value={value} type={type || "text"}
+                  onChange={e => { set(e.target.value); setCreateError(""); }}
+                  onKeyDown={e => e.key === "Enter" && handleCreateLobby()}
+                  placeholder={placeholder}
+                  style={{ width:"100%", background:"rgba(255,255,255,0.06)", border:`1px solid ${createError ? "#E10600" : "rgba(255,255,255,0.12)"}`, borderRadius:8, padding:"12px 16px", color:"#fff", fontSize:15, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:1, outline:"none", caretColor:"#E10600", boxSizing:"border-box" }}
+                />
+              </div>
+            ))}
+
+            {createError && <div style={{ color:"#E10600", fontSize:11, marginBottom:8, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:1 }}>{createError}</div>}
+            <button
+              onClick={handleCreateLobby}
+              style={{ width:"100%", marginTop:6, background:"#E10600", border:"none", borderRadius:8, padding:"14px", color:"#fff", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:15, letterSpacing:3, cursor:"pointer", transition:"background 0.15s" }}
+              onMouseEnter={e => e.currentTarget.style.background="#c00400"}
+              onMouseLeave={e => e.currentTarget.style.background="#E10600"}
+            >CREATE LOBBY →</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── JOIN LOBBY MODAL ── */}
       {showJoin && (
         <div
           style={{ position:"fixed", inset:0, zIndex:200, background:"rgba(0,0,0,0.8)", backdropFilter:"blur(8px)", display:"flex", alignItems:"center", justifyContent:"center", animation:"fadeIn 0.2s ease" }}
-          onClick={() => { setShowJoin(false); setJoinError(""); setJoinCode(""); }}
+          onClick={() => { setShowJoin(false); setJoinError(""); setJoinLobbyName(""); setJoinPassword(""); setJoinUsername(""); }}
         >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background:"#111", border:"1px solid rgba(255,255,255,0.1)", borderRadius:16, padding:"36px 40px", width:"min(440px,92vw)", animation:"slideUp 0.3s ease" }}
-          >
-            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:3, color:"#E10600", marginBottom:6 }}>MULTIPLAYER</div>
-            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:36, color:"#fff", marginBottom:24, letterSpacing:1 }}>Join a Room</div>
-            <div style={{ marginBottom:8, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:11, letterSpacing:2, color:"rgba(255,255,255,0.4)" }}>ROOM CODE</div>
-            <input
-              value={joinCode}
-              onChange={e => { setJoinCode(e.target.value.toUpperCase()); setJoinError(""); }}
-              onKeyDown={e => e.key === "Enter" && handleJoin()}
-              placeholder="e.g.  SPA-4829"
-              maxLength={8}
-              style={{ width:"100%", background:"rgba(255,255,255,0.06)", border:`1px solid ${joinError ? "#E10600" : "rgba(255,255,255,0.12)"}`, borderRadius:8, padding:"14px 18px", color:"#fff", fontSize:22, fontFamily:"'Bebas Neue',sans-serif", letterSpacing:3, outline:"none", caretColor:"#E10600", boxSizing:"border-box" }}
-            />
-            {joinError && <div style={{ color:"#E10600", fontSize:11, marginTop:6, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:1 }}>{joinError}</div>}
+          <div onClick={e => e.stopPropagation()} style={{ position:"relative", background:"#111", border:"1px solid rgba(255,255,255,0.1)", borderRadius:16, padding:"36px 40px", width:"min(440px,92vw)", animation:"slideUp 0.3s ease" }}>
             <button
-              onClick={handleJoin}
-              style={{ width:"100%", marginTop:20, background:"#E10600", border:"none", borderRadius:8, padding:"14px", color:"#fff", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:15, letterSpacing:3, cursor:"pointer", transition:"background 0.15s" }}
+              onClick={() => { setShowJoin(false); setJoinError(""); setJoinLobbyName(""); setJoinPassword(""); setJoinUsername(""); }}
+              style={{ position:"absolute", top:16, right:16, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", color:"rgba(255,255,255,0.5)", fontSize:16, lineHeight:1, transition:"all 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.background="rgba(255,255,255,0.12)"; e.currentTarget.style.color="#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background="rgba(255,255,255,0.06)"; e.currentTarget.style.color="rgba(255,255,255,0.5)"; }}
+            >✕</button>
+            <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:3, color:"#E10600", marginBottom:6 }}>MULTIPLAYER</div>
+            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:36, color:"#fff", marginBottom:24, letterSpacing:1 }}>Join Lobby</div>
+
+            {[
+              { label:"LOBBY NAME", value:joinLobbyName, set:setJoinLobbyName, placeholder:"e.g.  Monaco GP" },
+              { label:"PASSWORD",   value:joinPassword,   set:setJoinPassword,   placeholder:"••••••••", type:"password" },
+              { label:"YOUR NAME",  value:joinUsername,   set:setJoinUsername,   placeholder:"e.g.  Verstappen" },
+            ].map(({ label, value, set, placeholder, type }) => (
+              <div key={label} style={{ marginBottom:14 }}>
+                <div style={{ marginBottom:6, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:11, letterSpacing:2, color:"rgba(255,255,255,0.4)" }}>{label}</div>
+                <input
+                  value={value} type={type || "text"}
+                  onChange={e => { set(e.target.value); setJoinError(""); }}
+                  onKeyDown={e => e.key === "Enter" && handleJoinLobby()}
+                  placeholder={placeholder}
+                  style={{ width:"100%", background:"rgba(255,255,255,0.06)", border:`1px solid ${joinError ? "#E10600" : "rgba(255,255,255,0.12)"}`, borderRadius:8, padding:"12px 16px", color:"#fff", fontSize:15, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:1, outline:"none", caretColor:"#E10600", boxSizing:"border-box" }}
+                />
+              </div>
+            ))}
+
+            {joinError && <div style={{ color:"#E10600", fontSize:11, marginBottom:8, fontFamily:"'Barlow Condensed',sans-serif", letterSpacing:1 }}>{joinError}</div>}
+            <button
+              onClick={handleJoinLobby}
+              style={{ width:"100%", marginTop:6, background:"#E10600", border:"none", borderRadius:8, padding:"14px", color:"#fff", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:15, letterSpacing:3, cursor:"pointer", transition:"background 0.15s" }}
               onMouseEnter={e => e.currentTarget.style.background="#c00400"}
               onMouseLeave={e => e.currentTarget.style.background="#E10600"}
-            >JOIN ROOM →</button>
+            >JOIN LOBBY →</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── LOBBY ROOM SCREEN ── */}
+      {screen === "lobby-room" && lobby && (
+        <div style={{
+          position:"fixed", inset:0, zIndex:300,
+          background:`linear-gradient(180deg, rgba(205,209,216,0.92) 0%, rgba(176,181,190,0.85) 100%), url(${pitGarageSrc}) center center / cover no-repeat`,
+          display:"flex", flexDirection:"column",
+          fontFamily:"'Barlow Condensed',sans-serif",
+          color:"#111",
+          animation:"fadeIn 0.35s ease",
+          overflow:"hidden",
+        }}>
+          {/* Grid overlay — matches section-shell::before */}
+          <div style={{ position:"absolute", inset:0, pointerEvents:"none", zIndex:0,
+            background:"radial-gradient(circle at top left, rgba(225,6,0,0.12), transparent 32%), linear-gradient(90deg, rgba(255,255,255,0.52) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.42) 1px, transparent 1px)",
+            backgroundSize:"auto, 56px 56px, 56px 56px",
+          }} />
+
+          {/* Nav — same as landing */}
+          <nav style={{
+            position:"relative", zIndex:10, flexShrink:0,
+            height:86, display:"flex", alignItems:"center", justifyContent:"space-between",
+            padding:"0 34px", margin:"18px 22px 0", borderRadius:24,
+            background:"linear-gradient(180deg, rgba(145,151,162,0.7) 0%, rgba(90,96,107,0.46) 100%)",
+            border:"1px solid rgba(255,255,255,0.2)",
+            boxShadow:"0 18px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
+            backdropFilter:"blur(22px)",
+          }}>
+            <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+              {f1LogoSrc && <img src={f1LogoSrc} alt="F1" style={{ height:44, width:"auto", filter:"drop-shadow(0 6px 14px rgba(225,6,0,0.22))" }} />}
+              <div style={{ width:1, height:28, background:"rgba(255,255,255,0.24)" }} />
+              <span style={{ fontWeight:700, fontSize:15, letterSpacing:4.8, color:"rgba(255,255,255,0.9)", textTransform:"uppercase" }}>Race Simulator</span>
+            </div>
+            <button
+              onClick={() => { setScreen("landing"); setLobby(null); }}
+              style={{ background:"transparent", border:"1px solid rgba(255,255,255,0.22)", borderRadius:8, padding:"10px 22px", color:"rgba(255,255,255,0.72)", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:12, letterSpacing:3, cursor:"pointer", transition:"all 0.15s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor="rgba(255,255,255,0.55)"; e.currentTarget.style.color="#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor="rgba(255,255,255,0.22)"; e.currentTarget.style.color="rgba(255,255,255,0.72)"; }}
+            >← LEAVE</button>
+          </nav>
+
+          {/* Content */}
+          <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:"40px 24px", position:"relative", zIndex:1 }}>
+            <div style={{ width:"min(620px,100%)", display:"flex", flexDirection:"column", gap:22 }}>
+
+              {/* Lobby title */}
+              <div style={{ animation:"panelIn 0.4s ease" }}>
+                <div style={{ fontWeight:600, fontSize:11, letterSpacing:3.5, color:"#E10600", marginBottom:6 }}>LOBBY</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(44px,5vw,76px)", color:"#111", letterSpacing:"0.02em", lineHeight:0.95 }}>{lobby.name}</div>
+                <div style={{ marginTop:12, height:2, width:56, background:"#E10600", borderRadius:1 }} />
+              </div>
+
+              {/* Players glass panel */}
+              <div style={{
+                background:"linear-gradient(180deg, rgba(186,191,200,0.9) 0%, rgba(157,163,173,0.8) 100%)",
+                border:"1px solid rgba(255,255,255,0.22)",
+                borderRadius:26, backdropFilter:"blur(22px)",
+                boxShadow:"0 28px 72px rgba(0,0,0,0.16)",
+                padding:"30px 32px",
+                animation:"panelIn 0.45s ease 0.05s both",
+              }}>
+                <div style={{ fontWeight:600, fontSize:10, letterSpacing:3.5, color:"rgba(17,17,17,0.45)", marginBottom:18, textTransform:"uppercase" }}>
+                  Drivers on Grid — {lobby.players.length}
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                  {lobby.players.map((p, i) => (
+                    <div key={i} style={{
+                      display:"flex", alignItems:"center", gap:16,
+                      padding:"15px 20px",
+                      background:"rgba(255,255,255,0.44)",
+                      border:"1px solid rgba(255,255,255,0.4)",
+                      borderRadius:16,
+                      boxShadow:"0 4px 18px rgba(0,0,0,0.06)",
+                      transition:"transform 0.15s",
+                    }}>
+                      {/* Avatar */}
+                      <div style={{
+                        width:42, height:42, borderRadius:"50%", flexShrink:0,
+                        background: p.isHost ? "linear-gradient(135deg,#E10600,#ff4422)" : "linear-gradient(135deg,rgba(100,104,115,0.3),rgba(80,84,95,0.2))",
+                        display:"flex", alignItems:"center", justifyContent:"center",
+                        fontFamily:"'Bebas Neue',sans-serif", fontSize:17,
+                        color: p.isHost ? "#fff" : "#111",
+                        boxShadow: p.isHost ? "0 4px 14px rgba(225,6,0,0.28)" : "none",
+                        border:"1.5px solid rgba(255,255,255,0.5)",
+                      }}>
+                        {p.username.charAt(0).toUpperCase()}
+                      </div>
+                      {/* Name + role */}
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontWeight:700, fontSize:18, color:"#111", letterSpacing:1.5, textTransform:"uppercase", lineHeight:1 }}>{p.username}</div>
+                        <div style={{ fontSize:10, letterSpacing:3, marginTop:3, color: p.isHost ? "#E10600" : "rgba(17,17,17,0.38)", fontWeight:600 }}>
+                          {p.isHost ? "HOST" : "DRIVER"}
+                        </div>
+                      </div>
+                      {/* Position number */}
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, letterSpacing:1, color:"rgba(17,17,17,0.18)", lineHeight:1 }}>P{i + 1}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* NEXT button */}
+              <button
+                onClick={handleStartSetup}
+                style={{
+                  width:"100%", padding:"18px", borderRadius:16, border:"none",
+                  background:"linear-gradient(135deg, #E10600, #c00400)",
+                  color:"#fff", fontFamily:"'Bebas Neue',sans-serif", fontSize:26,
+                  letterSpacing:3, cursor:"pointer", transition:"transform 0.15s, box-shadow 0.15s",
+                  boxShadow:"0 8px 28px rgba(225,6,0,0.3)",
+                  animation:"panelIn 0.5s ease 0.15s both",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow="0 12px 36px rgba(225,6,0,0.4)"; }}
+                onMouseLeave={e => { e.currentTarget.style.transform="translateY(0)"; e.currentTarget.style.boxShadow="0 8px 28px rgba(225,6,0,0.3)"; }}
+              >
+                NEXT &rarr; SETUP STRATEGY
+              </button>
+
+            </div>
           </div>
         </div>
       )}
