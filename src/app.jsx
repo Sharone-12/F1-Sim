@@ -9,9 +9,11 @@ import { syncRaceStateCalculations, TYRE_COMPOUNDS } from "./simulation/raceEngi
 import { useRaceController } from "./hooks/useRaceController";
 import { usePitSystem } from "./hooks/usePitSystem";
 
-const pitGarageImageSrc = new URL("./components/assets/pit_garage.png", import.meta.url).href;
+const pitGarageImageSrc = "/landing.png";
 const f1LogoImageSrc = new URL("./components/assets/New_era_F1_logo.png", import.meta.url).href;
 const spaMapImageSrc = new URL("./components/assets/spa_map.png", import.meta.url).href;
+// Served from /public — overwrite public/landing.png and changes reflect on refresh.
+const landingImageSrc = "/landing.png";
 
 // ─── CONSTANTS (copy from app.jsx) ───────────────────────────────────────────
 const TEAMS = {
@@ -29,6 +31,9 @@ const TEAMS = {
 
 const DEFAULT_TOTAL_LAPS = 44;
 const TOTAL_GRID_SLOTS = 20;
+// After the leader finishes, hold this long so the rest of the field crosses
+// the line before results are shown.
+const COOLDOWN_MS = 2600;
 const TYRE_SETUP_OPTIONS = [
   { value: "soft", label: "Soft", short: "S" },
   { value: "medium", label: "Medium", short: "M" },
@@ -62,8 +67,14 @@ const RACE_PACE_OPTIONS = [
 ];
 const WEATHER_TO_RACE_WEATHER = {
   dry: "dry",
-  mixed: "light_rain",
+  mixed: "dry",          // starts dry but rain is likely at some point
   wet: "heavy_rain",
+};
+// Scales per-lap rain probability in the engine's stochastic weather model.
+const WEATHER_TO_BIAS = {
+  dry: 1,
+  mixed: 3.5,
+  wet: 5,
 };
 const TYRE_TO_RACE_COMPOUND = {
   soft: "S",
@@ -299,6 +310,7 @@ const createInitialRaceState = (username = "Player", includeBots = true, lobbyPl
     totalLaps: setup.race.laps,
     currentLap: 0,
     weather: WEATHER_TO_RACE_WEATHER[setup.race.weatherStrategy] || "dry",
+    weatherBias: WEATHER_TO_BIAS[setup.race.weatherStrategy] || 1,
     leaderboard: [],
     events: [],
   };
@@ -346,10 +358,10 @@ export const LANDING_STYLES = `
     text-shadow:0 1px 10px rgba(0,0,0,0.2);
   }
   .nav-link:hover { color:#fff; transform:translateY(-1px); }
-  .nav-link.active { color:#fff; border-bottom:1px solid #E10600; }
+  .nav-link.active { color:#fff; border-bottom:1px solid var(--f1-red); }
   .nav-link.active::after {
     content:''; position:absolute; bottom:-1px; left:0; right:0;
-    height:1px; background:#E10600;
+    height:1px; background:var(--f1-red);
     animation:revealLine 0.3s ease;
     transform-origin:left;
   }
@@ -367,7 +379,7 @@ export const LANDING_STYLES = `
   }
   .feat-card::before {
     content:''; position:absolute; left:24px; right:24px; top:0;
-    height:3px; background:linear-gradient(90deg,#E10600,rgba(225,6,0,0));
+    height:3px; background:linear-gradient(90deg,var(--f1-red),rgba(225,6,0,0));
     transform:scaleX(0); transform-origin:left;
     transition:transform 0.25s ease;
   }
@@ -386,7 +398,7 @@ export const LANDING_STYLES = `
   .step-item:hover { background:linear-gradient(180deg, rgba(33,34,39,0.98) 0%, rgba(20,21,25,0.95) 100%); border-color:rgba(225,6,0,0.24); transform:translateX(4px); }
   .step-item::after {
     content:''; position:absolute; left:18px; right:18px; bottom:0;
-    height:2px; background:linear-gradient(90deg,#E10600,transparent);
+    height:2px; background:linear-gradient(90deg,var(--f1-red),transparent);
     transform:scaleX(0); transform-origin:left; transition:transform 0.3s ease;
   }
   .step-item:hover::after { transform:scaleX(1); }
@@ -395,7 +407,7 @@ export const LANDING_STYLES = `
     border-left:2px solid rgba(255,255,255,0.06);
     padding-left:20px; transition:border-color 0.2s;
   }
-  .stat-block:hover { border-color:#E10600; }
+  .stat-block:hover { border-color:var(--f1-red); }
 
   .tyre-option {
     cursor:pointer; transition:all 0.2s;
@@ -403,16 +415,16 @@ export const LANDING_STYLES = `
     border-radius:8px; padding:16px 20px;
   }
   .tyre-option:hover { border-color:rgba(255,255,255,0.2); background:rgba(255,255,255,0.03); }
-  .tyre-option.selected { border-color:#E10600; background:rgba(225,6,0,0.05); }
+  .tyre-option.selected { border-color:var(--f1-red); background:rgba(225,6,0,0.05); }
 
   .cta-primary {
-    background:#E10600; border:none; border-radius:4px;
+    background:var(--f1-red); border:none; border-radius:4px;
     padding:13px 28px; color:#fff;
     font-family:'Barlow Condensed',sans-serif;
     font-weight:700; font-size:13px; letter-spacing:3px;
     cursor:pointer; transition:background 0.15s, transform 0.15s, box-shadow 0.15s;
   }
-  .cta-primary:hover { background:#c00400; transform:translateY(-2px); box-shadow:0 12px 28px rgba(225,6,0,0.22); }
+  .cta-primary:hover { background:var(--f1-red-hover); transform:translateY(-2px); box-shadow:0 12px 28px rgba(225,6,0,0.22); }
   .cta-primary:active { transform:translateY(0); }
 
   .cta-ghost {
@@ -446,8 +458,7 @@ export const LANDING_STYLES = `
     position:relative;
     color:#111;
     background:
-      linear-gradient(180deg, rgba(205,209,216,0.9) 0%, rgba(176,181,190,0.82) 100%),
-      url('${pitGarageImageSrc}') center center / cover no-repeat;
+      rgba(241, 243, 246, 0.92) url('${pitGarageImageSrc}') center center / cover no-repeat;
   }
 
   .section-shell::before {
@@ -455,9 +466,9 @@ export const LANDING_STYLES = `
     position:absolute;
     inset:0;
     background:
-      radial-gradient(circle at top left, rgba(225,6,0,0.12), transparent 32%),
-      linear-gradient(90deg, rgba(255,255,255,0.52) 1px, transparent 1px),
-      linear-gradient(rgba(255,255,255,0.42) 1px, transparent 1px);
+      radial-gradient(circle at top left, rgba(225,6,0,0.08), transparent 32%),
+      linear-gradient(90deg, rgba(17,17,17,0.06) 1px, transparent 1px),
+      linear-gradient(rgba(17,17,17,0.04) 1px, transparent 1px);
     background-size:auto, 56px 56px, 56px 56px;
     pointer-events:none;
   }
@@ -472,10 +483,10 @@ export const LANDING_STYLES = `
   }
 
   .glass-panel {
-    background:linear-gradient(180deg, rgba(186,191,200,0.88) 0%, rgba(157,163,173,0.78) 100%);
-    border:1px solid rgba(255,255,255,0.18);
+    background:rgba(255, 255, 255, 0.75);
+    border:1px solid rgba(255, 255, 255, 0.5);
     border-radius:30px;
-    box-shadow:0 30px 80px rgba(0,0,0,0.18);
+    box-shadow:0 30px 80px rgba(0,0,0,0.1);
     backdrop-filter:blur(20px);
   }
 
@@ -768,7 +779,7 @@ export const LANDING_STYLES = `
   }
 
   .setup-switch.active .setup-switch-track {
-    background:#E10600;
+    background:var(--f1-red);
   }
 
   .setup-switch-thumb {
@@ -1041,9 +1052,53 @@ export const LANDING_STYLES = `
     }
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation-delay: 0s !important;
+      animation-duration: 0s !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0s !important;
+      scroll-behavior: auto !important;
+    }
+  }
 `;
 
 // ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
+
+function WeatherIcon({ weather, size = 40 }) {
+  const stroke = weather === "heavy_rain" ? "#2d7ef7" : weather === "light_rain" ? "#43d17f" : "#f5a623";
+  const common = { fill: "none", stroke, strokeWidth: 2.4, strokeLinecap: "round", strokeLinejoin: "round" };
+
+  if (weather === "dry") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+        <circle cx="24" cy="24" r="9" {...common} fill={`${stroke}22`} />
+        {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+          const r = (deg * Math.PI) / 180;
+          const x1 = 24 + Math.cos(r) * 15, y1 = 24 + Math.sin(r) * 15;
+          const x2 = 24 + Math.cos(r) * 20, y2 = 24 + Math.sin(r) * 20;
+          return <line key={deg} x1={x1} y1={y1} x2={x2} y2={y2} {...common} />;
+        })}
+      </svg>
+    );
+  }
+
+  const heavy = weather === "heavy_rain";
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      {/* cloud */}
+      <path
+        d="M14 28 a7 7 0 0 1 1.2 -13.9 a9 9 0 0 1 17.2 2.4 a6 6 0 0 1 -1.4 11.5 Z"
+        {...common}
+        fill={`${stroke}1f`}
+      />
+      {/* rain drops */}
+      {(heavy ? [13, 20, 27, 34] : [17, 26, 33]).map((x, i) => (
+        <line key={x} x1={x} y1={32} x2={x - 2.5} y2={heavy ? 42 : 39} {...common} strokeWidth={heavy ? 2.8 : 2.2} opacity={0.9 - i * 0.08} />
+      ))}
+    </svg>
+  );
+}
 
 function RedLabel({ children }) {
   return (
@@ -2171,238 +2226,171 @@ function PostRaceResults({ raceState, onBackToLobby }) {
     .sort((a, b) => b.lap - a.lap)
     .slice(0, 5);
 
-  const metallicPanel = {
-    background: "linear-gradient(180deg, rgba(252,253,255,0.88) 0%, rgba(236,240,247,0.82) 100%)",
-    border: "1px solid rgba(255,255,255,0.72)",
-    boxShadow: "0 24px 52px rgba(15,22,34,0.12), inset 0 1px 0 rgba(255,255,255,0.96)",
-    backdropFilter: "blur(22px)",
-  };
-  const softLabel = {
-    fontWeight: 700,
-    fontSize: 10,
-    letterSpacing: 3,
-    color: "rgba(17,17,17,0.42)",
-    textTransform: "uppercase",
-  };
-  const cardShell = {
-    position: "relative",
-    overflow: "hidden",
-  };
   const winnerTeamColor = winner ? (TEAMS[winner.team]?.color || "#E10600") : "#E10600";
-  const illustrationCards = [
-    { title: "Starting Grid", subtitle: winner?.name || "Winner", tone: "rgba(255,196,94,0.16)", width: 280, height: 164, top: 96, left: -36, rotate: -8 },
-    { title: "Race", subtitle: "Green Flag", tone: "rgba(28,210,124,0.18)", width: 250, height: 146, top: 132, right: 56, rotate: 7 },
-    { title: "Fastest Lap", subtitle: fastestLap ? fastestLap.driver.name : "Telemetry", tone: "rgba(177,80,255,0.16)", width: 236, height: 138, top: 390, right: -12, rotate: -9 },
-    { title: "Driver Of The Day", subtitle: driverOfTheDay?.driver?.name || "Race Star", tone: "rgba(255,139,52,0.14)", width: 300, height: 154, bottom: 126, left: 22, rotate: 8 },
-  ];
-  const infoGridColumns = "repeat(auto-fit, minmax(150px, 1fr))";
-  const lowerGridColumns = "repeat(auto-fit, minmax(320px, 1fr))";
   const formatLapTime = (value) => (Number.isFinite(value) ? `${value.toFixed(3)}s` : "--");
+  const podiumAccent = ["var(--f1-red)", "#B6BABD", "#C58D56"];
+
+  // Premium light frosted container panel
+  const glassPanel = {
+    background: "rgba(255, 255, 255, 0.75)",
+    border: "1px solid rgba(255, 255, 255, 0.5)",
+    borderRadius: 30,
+    boxShadow: "0 30px 80px rgba(0,0,0,0.06)",
+    backdropFilter: "blur(20px)",
+  };
+  // Dark inner card
+  const darkCard = {
+    background: "rgba(12, 14, 18, 0.85)",
+    border: "1px solid rgba(255, 255, 255, 0.06)",
+    borderRadius: 22,
+    boxShadow: "0 22px 60px rgba(0,0,0,0.16)",
+  };
+  const darkStat = {
+    padding: "18px 16px",
+    borderRadius: 18,
+    background: "rgba(19, 20, 24, 0.92)",
+    border: "1px solid rgba(255, 255, 255, 0.08)",
+  };
+  const eyebrow = { fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: 4, color: "var(--f1-red)", textTransform: "uppercase" };
+  const sectionLabel = { fontFamily: "'Barlow Condensed',sans-serif", fontWeight: 700, fontSize: 10, letterSpacing: 4, color: "rgba(17, 17, 17, 0.34)", textTransform: "uppercase" };
 
   return (
-    <div style={{ position:"fixed", inset:0, zIndex:400, background:`linear-gradient(180deg, rgba(241,244,249,0.97) 0%, rgba(221,226,236,0.95) 55%, rgba(204,211,223,0.97) 100%), url(${pitGarageImageSrc}) center/cover no-repeat`, backdropFilter:"blur(12px)", overflowY:"auto", fontFamily:"'Barlow Condensed',sans-serif" }}>
-      <div
-        style={{
-          position:"fixed",
-          inset:0,
-          pointerEvents:"none",
-          background:
-            "linear-gradient(180deg, rgba(255,118,70,0.12) 0%, rgba(255,255,255,0.04) 28%, rgba(255,255,255,0) 54%), radial-gradient(circle at 18% 14%, rgba(255,245,227,0.72) 0%, rgba(255,238,219,0.18) 18%, transparent 34%), radial-gradient(circle at 76% 16%, rgba(61,207,158,0.12) 0%, transparent 24%), radial-gradient(circle at 82% 72%, rgba(108,88,255,0.12) 0%, transparent 24%), radial-gradient(circle at 18% 82%, rgba(77,107,255,0.14) 0%, transparent 28%)",
-          filter:"blur(8px) saturate(1.04)",
-          opacity:0.88,
-        }}
-      />
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", background:"radial-gradient(circle at top left, rgba(225,6,0,0.08), transparent 24%), linear-gradient(90deg, rgba(255,255,255,0.42) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.34) 1px, transparent 1px)", backgroundSize:"auto, 56px 56px, 56px 56px", opacity:0.42 }} />
-      <div style={{ position:"fixed", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:0 }}>
-        <div style={{ position:"absolute", inset:"8% 6%", borderRadius:42, border:"1px solid rgba(255,255,255,0.36)", boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.18)" }} />
-        <div style={{ position:"absolute", inset:"14% 0 auto 0", height:160, background:"repeating-linear-gradient(135deg, rgba(255,255,255,0.15) 0 14px, rgba(255,255,255,0) 14px 28px)", opacity:0.22, transform:"translateX(-14%) rotate(-4deg)" }} />
-        {illustrationCards.map((card) => (
-          <div
-            key={card.title}
-            style={{
-              position:"absolute",
-              width:card.width,
-              height:card.height,
-              top:card.top,
-              right:card.right,
-              bottom:card.bottom,
-              left:card.left,
-              borderRadius:28,
-              padding:"20px 22px",
-              background:`linear-gradient(180deg, rgba(255,255,255,0.7) 0%, rgba(237,241,248,0.58) 100%), ${card.tone}`,
-              border:"1px solid rgba(255,255,255,0.56)",
-              boxShadow:"0 18px 42px rgba(15,22,34,0.12), inset 0 1px 0 rgba(255,255,255,0.76)",
-              backdropFilter:"blur(16px)",
-              transform:`rotate(${card.rotate}deg)`,
-              opacity:0.62,
-            }}
-          >
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-              <div style={{ width:72, height:20, background:"linear-gradient(90deg, rgba(17,17,17,0.9) 0%, rgba(17,17,17,0.72) 82%, rgba(17,17,17,0) 100%)", clipPath:"polygon(0 0, 76% 0, 56% 100%, 0 100%)", borderRadius:4 }} />
-              <div style={{ fontWeight:700, fontSize:10, letterSpacing:2.6, color:"rgba(17,17,17,0.56)", textTransform:"uppercase" }}>Race</div>
-            </div>
-            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:card.title.length > 14 ? 26 : 34, lineHeight:0.94, letterSpacing:1.2, color:"#111" }}>{card.title}</div>
-            <div style={{ marginTop:10, fontWeight:600, fontSize:14, color:"rgba(17,17,17,0.46)", textTransform:"uppercase", letterSpacing:1.8 }}>{card.subtitle}</div>
-            <div style={{ position:"absolute", inset:"auto 18px 18px auto", width:82, height:82, borderRadius:"50%", background:"radial-gradient(circle, rgba(255,255,255,0.66) 0%, rgba(255,255,255,0) 72%)" }} />
+    <div style={{ position:"fixed", inset:0, zIndex:400, overflowY:"auto", color:"#111", fontFamily:"'Barlow Condensed',sans-serif",
+      background:`rgba(241, 243, 246, 0.95) url(${pitGarageImageSrc}) center center / cover no-repeat` }}>
+      {/* Grid overlay + accent */}
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", backgroundImage:"linear-gradient(90deg, rgba(17,17,17,0.05) 1px, transparent 1px), linear-gradient(rgba(17,17,17,0.04) 1px, transparent 1px)", backgroundSize:"56px 56px", opacity:0.5 }} />
+      <div style={{ position:"fixed", inset:0, pointerEvents:"none", background:"radial-gradient(circle at top left, rgba(225,6,0,0.06), transparent 28%)" }} />
+
+      <div style={{ maxWidth:1200, margin:"0 auto", padding:"56px 24px 64px", position:"relative", zIndex:1 }}>
+
+        {/* ── HEADER ── */}
+        <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1.1fr) minmax(340px,0.9fr)", gap:32, alignItems:"end", marginBottom:30 }}>
+          <div>
+            <div style={{ ...eyebrow, marginBottom:14 }}>Race Complete</div>
+            <BigTitle style={{ fontSize:"clamp(58px,6.5vw,104px)", color:"#111", letterSpacing:1.5, marginBottom:18 }}>CHECKERED<br/>FLAG</BigTitle>
+            <p style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:18, color:"rgba(17,17,17,0.68)", lineHeight:1.7, maxWidth:560 }}>
+              {winner?.name || "The field"} takes the win at Spa-Francorchamps after {raceState.totalLaps} laps. Full classification, strategy, and your setup impact below.
+            </p>
           </div>
-        ))}
-        <div style={{ position:"absolute", right:"6%", top:"10%", width:420, height:170, opacity:0.18, transform:"rotate(-7deg)" }}>
-          <div style={{ position:"absolute", inset:"48px 26px 46px 64px", borderRadius:999, background:"linear-gradient(90deg, rgba(18,18,18,0.18), rgba(18,18,18,0.08))", filter:"blur(2px)" }} />
-          <div style={{ position:"absolute", left:0, top:64, width:124, height:42, borderRadius:"28px 16px 20px 32px", background:"rgba(18,18,18,0.18)" }} />
-          <div style={{ position:"absolute", right:0, top:64, width:164, height:42, borderRadius:"16px 32px 32px 20px", background:"rgba(18,18,18,0.18)" }} />
-          <div style={{ position:"absolute", left:108, top:36, width:122, height:50, borderRadius:"28px 34px 20px 20px", background:"rgba(18,18,18,0.18)", transform:"skewX(-18deg)" }} />
-          <div style={{ position:"absolute", left:72, bottom:18, width:58, height:58, borderRadius:"50%", border:"11px solid rgba(18,18,18,0.2)" }} />
-          <div style={{ position:"absolute", right:76, bottom:18, width:58, height:58, borderRadius:"50%", border:"11px solid rgba(18,18,18,0.2)" }} />
-        </div>
-      </div>
-      <div style={{ maxWidth:1200, margin:"0 auto", padding:"56px 24px 60px", position:"relative", zIndex:1 }}>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))", gap:24, alignItems:"stretch", marginBottom:34 }}>
-          <div style={{ ...metallicPanel, ...cardShell, borderRadius:34, padding:"32px 30px" }}>
-            <div style={{ display:"inline-flex", alignItems:"center", gap:10, padding:"8px 14px", borderRadius:999, background:"rgba(255,255,255,0.08)", border:"1px solid rgba(255,255,255,0.1)", marginBottom:18 }}>
-              <div style={{ width:18, height:18, background:"repeating-conic-gradient(from 45deg, #fff 0 25%, #111 0 50%)", backgroundSize:"12px 12px", borderRadius:4 }} />
-              <span style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase" }}>Race Complete</span>
-            </div>
-            <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(56px,8vw,104px)", color:"#111", letterSpacing:2, lineHeight:0.88 }}>CHECKERED FLAG</div>
-            <div style={{ maxWidth:460, fontWeight:500, fontSize:16, color:"rgba(17,17,17,0.58)", lineHeight:1.35, marginTop:16 }}>
-              Premium end-of-race summary with broadcast-card energy, metallic glass surfaces, and a sharper finish worthy of the rest of the simulator.
-            </div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:10, marginTop:24 }}>
+          <div style={{ ...glassPanel, padding:"26px 26px 24px" }}>
+            <div style={{ ...sectionLabel, marginBottom:14 }}>Race Snapshot</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
               {[
-                "Spa-Francorchamps",
-                `${raceState.totalLaps} Laps`,
-                weatherLabel.toUpperCase(),
-                winner?.team || "Winner",
-              ].map((item) => (
-                <div key={item} style={{ padding:"10px 14px", borderRadius:999, background:"rgba(255,255,255,0.4)", border:"1px solid rgba(255,255,255,0.62)", color:"rgba(17,17,17,0.68)", fontWeight:700, fontSize:11, letterSpacing:2, textTransform:"uppercase" }}>
-                  {item}
+                { val:`${raceState.totalLaps}`, label:"Laps" },
+                { val:winner ? `${winner.pitCount}` : "--", label:"Winner Stops" },
+                { val:weatherLabel.split(" ")[0].toUpperCase(), label:"Weather" },
+                { val: fastestLap ? `${fastestLap.time.toFixed(1)}` : "--", label:"Fastest" },
+              ].map((s) => (
+                <div key={s.label} style={darkStat}>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff", lineHeight:1 }}>{s.val}</div>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:9, letterSpacing:2, color:"rgba(255,255,255,0.46)", textTransform:"uppercase", marginTop:6 }}>{s.label}</div>
                 </div>
               ))}
             </div>
           </div>
+        </div>
 
-          <div style={{ ...metallicPanel, ...cardShell, borderRadius:34, padding:"30px", background:`linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(237,241,248,0.84) 100%), radial-gradient(circle at top right, ${winnerTeamColor}18 0%, transparent 38%)` }}>
-            <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg, rgba(255,255,255,0.46) 0%, rgba(255,255,255,0) 30%)", pointerEvents:"none" }} />
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16, position:"relative" }}>
+        {/* ── WINNER SPOTLIGHT ── */}
+        <div style={{ ...glassPanel, padding:"30px", marginBottom:24 }}>
+          <div style={{ ...darkCard, position:"relative", overflow:"hidden", padding:"30px 32px", borderTop:`4px solid ${winnerTeamColor}` }}>
+            <div style={{ position:"relative", display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:16, flexWrap:"wrap" }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:10 }}>Winner Spotlight</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:56, color:"#111", lineHeight:0.9, letterSpacing:1.2 }}>{winner?.name || "--"}</div>
-                <div style={{ marginTop:10, fontWeight:700, fontSize:12, letterSpacing:2.2, color:"rgba(17,17,17,0.48)", textTransform:"uppercase" }}>{winner?.team || "Race Winner"}</div>
+                <span className="data-tag" style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.7)", borderColor:"rgba(255,255,255,0.12)" }}>Winner Spotlight</span>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:58, color:"#fff", lineHeight:0.9, letterSpacing:1.2, marginTop:14 }}>{winner?.name || "--"}</div>
+                <div style={{ marginTop:8, fontWeight:700, fontSize:12, letterSpacing:2.2, color:winnerTeamColor, textTransform:"uppercase" }}>{winner?.team || "Race Winner"}</div>
               </div>
-              <div style={{ minWidth:86, height:86, borderRadius:22, background:`linear-gradient(180deg, ${winnerTeamColor} 0%, rgba(255,255,255,0.12) 220%)`, boxShadow:`0 16px 32px ${winnerTeamColor}44`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#fff" }}>
-                P1
-              </div>
+              <div style={{ minWidth:84, height:84, borderRadius:20, background:winnerTeamColor, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#fff", fontWeight:700 }}>P1</div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:infoGridColumns, gap:12, marginTop:22, position:"relative" }}>
+            <div style={{ position:"relative", display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10, marginTop:22 }}>
               {[
                 { label:"Race Time", value:winner ? `${winner.totalTime.toFixed(3)}s` : "--" },
                 { label:"Fastest Lap", value: fastestLap ? formatLapTime(fastestLap.time) : "--" },
                 { label:"Pit Stops", value:winner ? `${winner.pitCount}` : "--" },
-                { label:"Start", value:`P${setupDriversById.get(winner?.id)?.slotIndex ?? winner?.position ?? 1}` },
+                { label:"Started", value:`P${setupDriversById.get(winner?.id)?.slotIndex ?? winner?.position ?? 1}` },
               ].map((item) => (
-                <div key={item.label} style={{ padding:"14px 14px 12px", borderRadius:18, background:"rgba(255,255,255,0.44)", border:"1px solid rgba(255,255,255,0.64)" }}>
-                  <div style={softLabel}>{item.label}</div>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#111", lineHeight:1, marginTop:8, letterSpacing:1 }}>{item.value}</div>
+                <div key={item.label} style={{ padding:"13px 14px", borderRadius:14, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.07)" }}>
+                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:9, letterSpacing:2, color:"rgba(255,255,255,0.42)", textTransform:"uppercase" }}>{item.label}</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:25, color:"#fff", lineHeight:1, marginTop:8, letterSpacing:1 }}>{item.value}</div>
                 </div>
               ))}
             </div>
           </div>
-        </div>
 
-        {/* Podium */}
-        <div style={{ display:"flex", justifyContent:"center", gap:16, marginBottom:40, flexWrap:"wrap" }}>
-          {sortedPlayers.slice(0, 3).map((driver, i) => (
-            <div key={driver.id} style={{
-              ...metallicPanel,
-              ...cardShell,
-              flex:"1 1 220px", maxWidth:290, padding:"28px 22px", borderRadius:26,
-              background: i === 0 ? "linear-gradient(180deg, rgba(255,251,246,0.97) 0%, rgba(255,234,222,0.9) 100%)" : "linear-gradient(180deg, rgba(252,253,255,0.94) 0%, rgba(231,235,243,0.84) 100%)",
-              border: `1px solid ${i === 0 ? "rgba(255,145,77,0.22)" : "rgba(255,255,255,0.62)"}`,
-              textAlign:"center", transform: i === 0 ? "scale(1.05)" : "none",
-              boxShadow: i === 0 ? "0 28px 56px rgba(255,113,51,0.16), inset 0 1px 0 rgba(255,255,255,0.98)" : metallicPanel.boxShadow,
-            }}>
-              <div style={{ position:"absolute", inset:0, background:`radial-gradient(circle at top center, ${(TEAMS[driver.team]?.color || "#E10600")}24 0%, transparent 56%)`, pointerEvents:"none" }} />
-              <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:44, color: i === 0 ? "#E10600" : "rgba(17,17,17,0.22)", lineHeight:1 }}>P{i + 1}</div>
-              <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:28, color:"#111", letterSpacing:1, marginTop:8 }}>{driver.name}</div>
-              <div style={{ position:"relative", fontWeight:600, fontSize:11, letterSpacing:2, color:"rgba(17,17,17,0.46)", marginTop:6, textTransform:"uppercase" }}>
-                {driver.totalTime.toFixed(1)}s &bull; {driver.pitCount} stop{driver.pitCount !== 1 ? "s" : ""}
-              </div>
-              {!driver.isBot && <div style={{ position:"relative", marginTop:8, padding:"4px 10px", borderRadius:999, background:"rgba(225,6,0,0.1)", color:"#E10600", fontWeight:700, fontSize:10, letterSpacing:2, display:"inline-block" }}>YOU</div>}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ ...metallicPanel, ...cardShell, borderRadius:28, padding:"24px 26px", marginBottom:28 }}>
-          <div style={{ ...softLabel, marginBottom:16, color:"#ff8f6b" }}>Race Summary</div>
-          <div style={{ display:"grid", gridTemplateColumns:infoGridColumns, gap:16 }}>
-            {[
-              { label:"Winner", value:winner?.name || "--" },
-              { label:"Race Time", value:winner ? `${winner.totalTime.toFixed(3)}s` : "--" },
-              { label:"Fastest Lap", value:fastestLap ? `${fastestLap.driver.name} • ${fastestLap.time.toFixed(3)}s` : "--" },
-              { label:"Winner Stops", value:winner ? `${winner.pitCount}` : "--" },
-              { label:"Weather", value:weatherLabel },
-            ].map((item) => (
-              <div key={item.label} style={{ padding:"14px 16px", borderRadius:20, background:"rgba(255,255,255,0.4)", border:"1px solid rgba(255,255,255,0.62)" }}>
-                <div style={softLabel}>{item.label}</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:"#111", lineHeight:0.95, letterSpacing:1, marginTop:8 }}>{item.value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Classification */}
-        <div style={{ ...metallicPanel, borderRadius:28, overflow:"hidden", marginBottom:28 }}>
-          <div style={{ padding:"16px 22px", borderBottom:"1px solid rgba(17,17,17,0.08)" }}>
-            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:12 }}>Final Classification</div>
-            <div style={{ display:"grid", gridTemplateColumns:"70px 1.5fr 1fr 1fr 100px 90px 150px", gap:14, color:"rgba(17,17,17,0.42)", fontSize:10, fontWeight:700, letterSpacing:2.2, textTransform:"uppercase" }}>
-              <div>Pos</div>
-              <div>Driver</div>
-              <div>Gap</div>
-              <div>Best Lap</div>
-              <div>Pits</div>
-              <div>Tyre</div>
-              <div>Stint</div>
-            </div>
-          </div>
-          {sortedPlayers.map((driver) => {
-            const gap = driver.position === 1 ? "LEADER" : `+${(driver.totalTime - leader.totalTime).toFixed(1)}s`;
-            const bestLapLabel = fastestLap?.driver?.id === driver.id ? fastestLap.time.toFixed(3) : driver.currentLapTime.toFixed(3);
-            const stintLabel = (driver.stintHistory || [{ compound: driver.tyre }]).map((stint) => stint.compound).join(" → ");
-            return (
-              <div key={driver.id} style={{
-                display:"grid", gridTemplateColumns:"70px 1.5fr 1fr 1fr 100px 90px 150px",
-                alignItems:"center", gap:14, padding:"16px 22px",
-                borderBottom:"1px solid rgba(17,17,17,0.06)",
-                background: !driver.isBot ? "linear-gradient(90deg, rgba(225,6,0,0.08) 0%, rgba(255,255,255,0.28) 100%)" : "rgba(255,255,255,0.22)",
-                boxShadow: `inset 3px 0 0 ${driver.position === 1 ? "#ff8f6b" : driver.position === 2 ? "rgba(255,255,255,0.5)" : driver.position === 3 ? "#c58d56" : "transparent"}`,
-              }}>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"rgba(17,17,17,0.76)" }}>{driver.position}</div>
-                <div>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#111", letterSpacing:1 }}>
-                    {driver.name} {!driver.isBot && <span style={{ color:"#E10600", fontSize:12 }}>&#9733;</span>}
+          {/* Podium row */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:16, marginTop:16 }}>
+            {sortedPlayers.slice(0, 3).map((driver, i) => {
+              const teamColor = TEAMS[driver.team]?.color || "var(--f1-red)";
+              return (
+                <div key={driver.id} style={{
+                  ...darkCard,
+                  position:"relative",
+                  overflow:"hidden",
+                  padding:"24px 22px",
+                  textAlign:"center",
+                  border:`1px solid ${i === 0 ? "rgba(225,6,0,0.3)" : "rgba(255,255,255,0.08)"}`,
+                  borderTop:`4px solid ${teamColor}`
+                }}>
+                  <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:44, color:podiumAccent[i], lineHeight:1 }}>P{i + 1}</div>
+                  <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"#fff", letterSpacing:1, marginTop:8 }}>{driver.name}</div>
+                  <div style={{ position:"relative", fontWeight:600, fontSize:11, letterSpacing:2, color:"rgba(255,255,255,0.46)", marginTop:6, textTransform:"uppercase" }}>
+                    {driver.totalTime.toFixed(1)}s &bull; {driver.pitCount} stop{driver.pitCount !== 1 ? "s" : ""}
                   </div>
-                  <div style={{ fontWeight:600, fontSize:10, letterSpacing:2, color:"rgba(17,17,17,0.36)" }}>
-                    {driver.team || (driver.isBot ? "BOT" : "PLAYER")} • Grid {setupDriversById.get(driver.id)?.slotIndex ?? driver.position}
-                  </div>
+                  {!driver.isBot && <div style={{ position:"relative", marginTop:9, padding:"4px 11px", borderRadius:999, background:"rgba(225,6,0,0.18)", color:"#ff6a5d", fontWeight:700, fontSize:10, letterSpacing:2, display:"inline-block" }}>YOU</div>}
                 </div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(17,17,17,0.62)" }}>{gap}</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:fastestLap?.driver?.id === driver.id ? "#9a51e0" : "rgba(17,17,17,0.82)" }}>{bestLapLabel}s</div>
-                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2, color:"rgba(17,17,17,0.56)", textTransform:"uppercase" }}>{driver.pitCount}</div>
-                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2, color:TYRE_COMPOUNDS[driver.tyre]?.color || "#111", textTransform:"uppercase" }}>{driver.tyre}</div>
-                <div style={{ fontWeight:700, fontSize:11, letterSpacing:1.4, color:"rgba(17,17,17,0.5)", textTransform:"uppercase" }}>{stintLabel}</div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
 
-        {/* Strategy Timeline */}
-        <div style={{ ...metallicPanel, borderRadius:28, padding:"22px", marginBottom:28 }}>
-          <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Strategy Timeline</div>
+        {/* ── CLASSIFICATION ── */}
+        <div style={{ ...glassPanel, padding:"30px", marginBottom:24 }}>
+          <div style={{ ...sectionLabel, marginBottom:18 }}>Final Classification</div>
+          <div style={{ ...darkCard, overflow:"hidden", boxShadow:"none" }}>
+            <div style={{ display:"grid", gridTemplateColumns:"58px 1.6fr 1fr 1fr 64px 56px 1.2fr", gap:14, padding:"14px 22px", borderBottom:"1px solid rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.4)", fontSize:10, fontWeight:700, letterSpacing:2, textTransform:"uppercase" }}>
+              <div>Pos</div><div>Driver</div><div>Gap</div><div>Best Lap</div><div>Pits</div><div>Tyre</div><div>Stint</div>
+            </div>
+            {sortedPlayers.map((driver, idx) => {
+              const gap = driver.position === 1 ? "LEADER" : `+${(driver.totalTime - leader.totalTime).toFixed(1)}s`;
+              const bestLapLabel = fastestLap?.driver?.id === driver.id ? fastestLap.time.toFixed(3) : driver.currentLapTime.toFixed(3);
+              const stintLabel = (driver.stintHistory || [{ compound: driver.tyre }]).map((stint) => stint.compound).join(" → ");
+              const isFastest = fastestLap?.driver?.id === driver.id;
+              return (
+                <div key={driver.id} style={{
+                  display:"grid", gridTemplateColumns:"58px 1.6fr 1fr 1fr 64px 56px 1.2fr",
+                  alignItems:"center", gap:14, padding:"13px 22px",
+                  borderBottom: idx < sortedPlayers.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+                  background: !driver.isBot ? "linear-gradient(90deg, rgba(225,6,0,0.14) 0%, transparent 62%)" : "transparent",
+                  boxShadow: `inset 3px 0 0 ${driver.position === 1 ? "#E10600" : driver.position === 2 ? "rgba(255,255,255,0.4)" : driver.position === 3 ? "#C58D56" : "transparent"}`,
+                }}>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:26, color:"rgba(255,255,255,0.85)" }}>{driver.position}</div>
+                  <div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:21, color:"#fff", letterSpacing:1 }}>
+                      {driver.name} {!driver.isBot && <span style={{ color:"#ff6a5d", fontSize:12 }}>&#9733;</span>}
+                    </div>
+                    <div style={{ fontWeight:600, fontSize:10, letterSpacing:1.5, color:TEAMS[driver.team]?.color ? `${TEAMS[driver.team].color}dd` : "rgba(255,255,255,0.36)", textTransform:"uppercase" }}>
+                      {driver.team || (driver.isBot ? "BOT" : "PLAYER")} · Grid {setupDriversById.get(driver.id)?.slotIndex ?? driver.position}
+                    </div>
+                  </div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(255,255,255,0.6)" }}>{gap}</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:isFastest ? "#c79bff" : "rgba(255,255,255,0.82)" }}>{bestLapLabel}s</div>
+                  <div style={{ fontWeight:700, fontSize:13, color:"rgba(255,255,255,0.56)" }}>{driver.pitCount}</div>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:17, letterSpacing:1, color:TYRE_COMPOUNDS[driver.tyre]?.color || "#fff" }}>{driver.tyre}</div>
+                  <div style={{ fontWeight:700, fontSize:11, letterSpacing:1.2, color:"rgba(255,255,255,0.5)", textTransform:"uppercase" }}>{stintLabel}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── STRATEGY TIMELINE ── */}
+        <div style={{ ...glassPanel, padding:"30px", marginBottom:24 }}>
+          <div style={{ ...sectionLabel, marginBottom:18 }}>Strategy Timeline</div>
           {sortedPlayers.map((driver) => {
             const stints = driver.stintHistory || [{ compound: driver.tyre, startLap: 0 }];
             return (
-              <div key={driver.id} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:10 }}>
-                <div style={{ width:120, fontFamily:"'Bebas Neue',sans-serif", fontSize:14, color: !driver.isBot ? "#E10600" : "rgba(17,17,17,0.72)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{driver.name}</div>
-                <div style={{ flex:1, display:"flex", height:22, borderRadius:999, overflow:"hidden", background:"rgba(255,255,255,0.28)", border:"1px solid rgba(255,255,255,0.5)" }}>
+              <div key={driver.id} style={{ display:"flex", alignItems:"center", gap:12, marginBottom:9 }}>
+                <div style={{ width:128, fontFamily:"'Bebas Neue',sans-serif", fontSize:15, color: !driver.isBot ? "var(--f1-red)" : "rgba(255,255,255,0.78)", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{driver.name}</div>
+                <div style={{ flex:1, display:"flex", height:22, borderRadius:999, overflow:"hidden", background:"rgba(19,20,24,0.9)", border:"1px solid rgba(255,255,255,0.1)" }}>
                   {stints.map((stint, i) => {
                     const endLap = stint.endLap || raceState.totalLaps;
                     const width = ((endLap - stint.startLap) / raceState.totalLaps) * 100;
@@ -2410,7 +2398,7 @@ function PostRaceResults({ raceState, onBackToLobby }) {
                     return (
                       <div key={i} style={{
                         width:`${width}%`, background:`${tyreColor}44`,
-                        borderRight: i < stints.length - 1 ? "2px solid rgba(0,0,0,0.45)" : "none",
+                        borderRight: i < stints.length - 1 ? "2px solid rgba(0,0,0,0.55)" : "none",
                         display:"flex", alignItems:"center", justifyContent:"center",
                         fontFamily:"'Bebas Neue',sans-serif", fontSize:12, color:tyreColor, letterSpacing:1,
                       }}>
@@ -2422,83 +2410,87 @@ function PostRaceResults({ raceState, onBackToLobby }) {
               </div>
             );
           })}
-          <div style={{ display:"flex", justifyContent:"space-between", marginTop:8, fontWeight:600, fontSize:9, letterSpacing:2, color:"rgba(17,17,17,0.28)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginTop:10, fontWeight:600, fontSize:9, letterSpacing:2, color:"rgba(255,255,255,0.4)" }}>
             <span>LAP 0</span><span>LAP {raceState.totalLaps}</span>
           </div>
         </div>
 
-        <div style={{ display:"grid", gridTemplateColumns:lowerGridColumns, gap:24, marginBottom:28 }}>
-          <div style={{ ...metallicPanel, borderRadius:28, padding:"22px" }}>
-            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Race Highlights</div>
+        {/* ── HIGHLIGHTS + DRIVER OF THE DAY ── */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))", gap:24, marginBottom:24 }}>
+          <div style={{ ...glassPanel, padding:"30px" }}>
+            <div style={{ ...sectionLabel, marginBottom:18 }}>Race Highlights</div>
             {highlightItems.length === 0 ? (
-              <div style={{ color:"rgba(17,17,17,0.46)", fontWeight:600, fontSize:14 }}>No major highlights recorded.</div>
+              <div style={{ color:"rgba(255,255,255,0.5)", fontWeight:600, fontSize:14 }}>No major highlights recorded.</div>
             ) : (
               highlightItems.map((item, i) => (
-                <div key={item.id} style={{ display:"grid", gridTemplateColumns:"80px 1fr auto", gap:14, alignItems:"center", padding:"12px 0", borderTop: i > 0 ? "1px solid rgba(17,17,17,0.06)" : "none" }}>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(17,17,17,0.46)" }}>LAP {item.lap}</div>
+                <div key={item.id} style={{ display:"grid", gridTemplateColumns:"70px 1fr auto", gap:14, alignItems:"center", padding:"13px 0", borderTop: i > 0 ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:18, color:"rgba(255,255,255,0.46)" }}>LAP {item.lap}</div>
                   <div>
-                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#111", lineHeight:0.95 }}>{item.title}</div>
-                    <div style={{ marginTop:4, fontWeight:600, fontSize:13, color:"rgba(17,17,17,0.52)" }}>{item.detail}</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:23, color:"#fff", lineHeight:0.95 }}>{item.title}</div>
+                    <div style={{ marginTop:4, fontWeight:600, fontSize:13, color:"rgba(255,255,255,0.6)" }}>{item.detail}</div>
                   </div>
-                  <div style={{ width:12, height:12, borderRadius:"50%", background:item.accent, boxShadow:`0 0 0 6px ${item.accent}22` }} />
+                  <div style={{ width:11, height:11, borderRadius:"50%", background:item.accent, boxShadow:`0 0 0 5px ${item.accent}22` }} />
                 </div>
               ))
             )}
           </div>
 
-          <div style={{ ...metallicPanel, ...cardShell, borderRadius:28, padding:"22px", background:"linear-gradient(180deg, rgba(248,249,252,0.96) 0%, rgba(236,230,236,0.88) 100%)" }}>
-            <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at top right, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0) 42%)", pointerEvents:"none" }} />
-            <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18, position:"relative" }}>Driver Of The Day</div>
+          <div style={{ ...glassPanel, padding:"30px" }}>
+            <div style={{ ...sectionLabel, marginBottom:18 }}>Driver Of The Day</div>
             {driverOfTheDay && (
-              <>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#111", lineHeight:0.92, marginBottom:10, position:"relative" }}>{driverOfTheDay.driver.name}</div>
-                <div style={{ fontWeight:700, fontSize:12, letterSpacing:2.4, color:"rgba(17,17,17,0.46)", textTransform:"uppercase", marginBottom:18, position:"relative" }}>
+              <div style={{ ...darkCard, position:"relative", overflow:"hidden", padding:"24px" }}>
+                <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at top right, rgba(182,109,255,0.2) 0%, transparent 48%)", pointerEvents:"none" }} />
+                <div style={{ position:"relative", fontFamily:"'Bebas Neue',sans-serif", fontSize:42, color:"#fff", lineHeight:0.92, marginBottom:8 }}>{driverOfTheDay.driver.name}</div>
+                <div style={{ position:"relative", fontWeight:700, fontSize:12, letterSpacing:2.4, color:"rgba(255,255,255,0.5)", textTransform:"uppercase", marginBottom:18 }}>
                   Grid {driverOfTheDay.startingSlot} → Finish P{driverOfTheDay.driver.position}
                 </div>
-                <div style={{ display:"grid", gap:12, position:"relative" }}>
+                <div style={{ position:"relative", display:"grid", gap:10 }}>
                   {[
                     { label:"Places Gained", value: `${driverOfTheDay.gainedPlaces >= 0 ? "+" : ""}${driverOfTheDay.gainedPlaces}` },
                     { label:"Pit Stops", value: `${driverOfTheDay.driver.pitCount}` },
                     { label:"Final Time", value: `${driverOfTheDay.driver.totalTime.toFixed(3)}s` },
                   ].map((item) => (
-                    <div key={item.label} style={{ padding:"12px 14px", borderRadius:18, background:"rgba(255,255,255,0.44)", border:"1px solid rgba(255,255,255,0.64)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
-                      <div style={softLabel}>{item.label}</div>
-                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#111", lineHeight:1 }}>{item.value}</div>
+                    <div key={item.label} style={{ padding:"12px 14px", borderRadius:14, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.07)", display:"flex", justifyContent:"space-between", alignItems:"center", gap:12 }}>
+                      <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:9, letterSpacing:2, color:"rgba(255,255,255,0.42)", textTransform:"uppercase" }}>{item.label}</div>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:24, color:"#fff", lineHeight:1 }}>{item.value}</div>
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Setup Impact Summary */}
-        <div style={{ ...metallicPanel, borderRadius:28, padding:"22px", marginBottom:32 }}>
-          <div style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#ff8f6b", textTransform:"uppercase", marginBottom:18 }}>Your Setup Impact</div>
+        {/* ── SETUP IMPACT ── */}
+        <div style={{ ...glassPanel, padding:"30px", marginBottom:30 }}>
+          <div style={{ ...sectionLabel, marginBottom:18 }}>Your Setup Impact</div>
           {(() => {
             const user = raceState.players.find(p => !p.isBot);
-            if (!user) return null;
+            if (!user) return <div style={{ color:"rgba(255,255,255,0.5)", fontWeight:600, fontSize:14 }}>No player car in this session.</div>;
             const items = [
               { label:"Starting Tyre", value:user.stintHistory?.[0]?.compound || "M", desc:"Your initial compound choice shaped early pace" },
               { label:"Downforce", value:`${user.setup.downforce}%`, desc: user.setup.downforce > 60 ? "High grip in corners, slower on straights" : user.setup.downforce < 40 ? "Low drag on straights, less corner grip" : "Balanced aero package" },
               { label:"Driving Style", value:user.drivingStyle, desc: user.drivingStyle === "aggressive" ? "Faster laps but higher tyre wear" : user.drivingStyle === "conservative" ? "Preserved tyres but slower pace" : "Even balance of pace and wear" },
               { label:"Final Position", value:`P${user.position}`, desc:`Finished ${user.position === 1 ? "on top" : `${user.totalTime > leader.totalTime ? `+${(user.totalTime - leader.totalTime).toFixed(1)}s behind` : "as leader"}`}` },
             ];
-            return items.map((item, i) => (
-              <div key={i} style={{ display:"flex", alignItems:"center", gap:16, padding:"12px 0", borderTop: i > 0 ? "1px solid rgba(17,17,17,0.06)" : "none", flexWrap:"wrap" }}>
-                <div style={{ minWidth:120, fontWeight:700, fontSize:11, letterSpacing:2, color:"rgba(17,17,17,0.42)", textTransform:"uppercase" }}>{item.label}</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, color:"#111", letterSpacing:1, minWidth:60 }}>{item.value}</div>
-                <div style={{ fontWeight:500, fontSize:12, color:"rgba(17,17,17,0.46)" }}>{item.desc}</div>
+            return (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(240px, 1fr))", gap:14 }}>
+                {items.map((item, i) => (
+                  <div key={i} style={{ ...darkCard, padding:"18px 18px 20px", boxShadow:"none" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:2, color:"rgba(255,255,255,0.42)", textTransform:"uppercase", marginBottom:10 }}>{item.label}</div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:30, color:"#fff", letterSpacing:1, lineHeight:1, marginBottom:10, textTransform:"uppercase" }}>{item.value}</div>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:500, fontSize:13, lineHeight:1.6, color:"rgba(255,255,255,0.62)" }}>{item.desc}</div>
+                  </div>
+                ))}
               </div>
-            ));
+            );
           })()}
         </div>
 
         <div style={{ textAlign:"center" }}>
-          <button type="button" onClick={onBackToLobby} style={{
-            padding:"16px 48px", borderRadius:16, border:"1px solid rgba(255,255,255,0.16)", background:"linear-gradient(180deg, #ff6a3d, #dd4e24)", color:"#fff",
-            boxShadow:"0 18px 32px rgba(255,104,58,0.22), inset 0 1px 0 rgba(255,255,255,0.22)", fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:14, letterSpacing:3, textTransform:"uppercase", cursor:"pointer",
-          }}>Back to Lobby</button>
+          <button type="button" className="cta-primary" onClick={onBackToLobby} style={{ padding:"16px 48px", fontSize:14, borderRadius:6 }}>
+            BACK TO LOBBY
+          </button>
         </div>
       </div>
     </div>
@@ -2521,8 +2513,10 @@ export function LandingPage({
   const [startLightsCount, setStartLightsCount] = useState(0);
   const [startLightsVisible, setStartLightsVisible] = useState(false);
   const [startLightsGo, setStartLightsGo] = useState(false);
+  const [lightsOut, setLightsOut] = useState(false);
   const [finishTransitionVisible, setFinishTransitionVisible] = useState(false);
   const prevRacePhaseRef = useRef(null);
+  const lastWeatherBannerIdRef = useRef(null);
 
   // ── LOBBY STATE ──
   const [lobby, setLobby] = useState(null);
@@ -2541,7 +2535,8 @@ export function LandingPage({
   const [joinPassword, setJoinPassword] = useState("");
   const [joinUsername, setJoinUsername] = useState("");
   const [joinError, setJoinError] = useState("");
-  const { playbackProgress } = useRaceController(raceState, setRaceState);
+  const [raceSpeed, setRaceSpeed] = useState(1);
+  useRaceController(raceState, setRaceState, raceSpeed, lightsOut);
   const { requestPit, selectPitTyre } = usePitSystem(setRaceState);
   const finishWinner = raceState.players.slice().sort((a, b) => a.position - b.position)[0];
   const finishWinnerLabel = finishWinner ? `Winner ${finishWinner.name}` : "Winner Pending";
@@ -2675,6 +2670,8 @@ export function LandingPage({
           setupLocked: true,
         })),
         weather: WEATHER_TO_RACE_WEATHER[setup.race.weatherStrategy] || "dry",
+        weatherBias: WEATHER_TO_BIAS[setup.race.weatherStrategy] || 1,
+        rngSeed: (Math.floor(Math.random() * 2147483647) | 0) || 1,
         totalLaps: setup.race.laps,
       });
     });
@@ -2740,6 +2737,20 @@ export function LandingPage({
   };
 
   // Finish sequence and delayed results reveal
+  // Cooldown: leader has finished — let the rest of the field cross the line,
+  // then move to the finished/results phase.
+  useEffect(() => {
+    if (raceState.racePhase !== "cooldown") return undefined;
+    const timer = setTimeout(() => {
+      setRaceState((previous) => (
+        previous.racePhase === "cooldown"
+          ? { ...previous, racePhase: "finished" }
+          : previous
+      ));
+    }, COOLDOWN_MS);
+    return () => clearTimeout(timer);
+  }, [raceState.racePhase]);
+
   useEffect(() => {
     if (raceState.racePhase === "finished") {
       setFinishTransitionVisible(true);
@@ -2760,6 +2771,7 @@ export function LandingPage({
   useEffect(() => {
     if (raceState.racePhase !== "racing") {
       setWeatherBanner(null);
+      lastWeatherBannerIdRef.current = null;
       return undefined;
     }
 
@@ -2767,34 +2779,42 @@ export function LandingPage({
       .reverse()
       .find((event) => event.type === "weather_change");
 
-    if (!latestWeatherEvent || weatherBanner?.id === latestWeatherEvent.timestamp) {
+    // Track the shown id in a ref so re-renders don't cancel the dismiss timer.
+    if (!latestWeatherEvent || lastWeatherBannerIdRef.current === latestWeatherEvent.timestamp) {
       return undefined;
     }
+    lastWeatherBannerIdRef.current = latestWeatherEvent.timestamp;
 
+    const to = latestWeatherEvent.to;
     const nextBanner = {
       id: latestWeatherEvent.timestamp,
       text:
         latestWeatherEvent.title ||
-        (latestWeatherEvent.to === "dry"
-          ? "TRACK DRYING"
-          : `${String(latestWeatherEvent.to).replace(/_/g, " ").toUpperCase()} STARTED`),
-      weather: latestWeatherEvent.to,
+        (to === "dry"
+          ? "TRACK DRYING OUT"
+          : to === "light_rain"
+            ? "LIGHT RAIN STARTED"
+            : to === "heavy_rain"
+              ? "HEAVY RAIN — STORM"
+              : `${String(to).replace(/_/g, " ").toUpperCase()} STARTED`),
+      weather: to,
       lap: latestWeatherEvent.lap,
     };
 
     setWeatherBanner(nextBanner);
     const timer = window.setTimeout(() => {
       setWeatherBanner((current) => (current?.id === nextBanner.id ? null : current));
-    }, 2400);
+    }, 3800);
 
     return () => window.clearTimeout(timer);
-  }, [raceState.events, raceState.racePhase, weatherBanner]);
+  }, [raceState.events, raceState.racePhase]);
 
   useEffect(() => {
     if (prevRacePhaseRef.current !== "racing" && raceState.racePhase === "racing") {
       setStartLightsVisible(true);
       setStartLightsCount(0);
       setStartLightsGo(false);
+      setLightsOut(false);
       const timers = [
         setTimeout(() => setStartLightsCount(1), 350),
         setTimeout(() => setStartLightsCount(2), 800),
@@ -2802,7 +2822,7 @@ export function LandingPage({
         setTimeout(() => setStartLightsCount(4), 1700),
         setTimeout(() => setStartLightsCount(5), 2150),
         setTimeout(() => setStartLightsCount(0), 3100),
-        setTimeout(() => setStartLightsGo(true), 3400),
+        setTimeout(() => { setStartLightsGo(true); setLightsOut(true); }, 3400),
         setTimeout(() => { setStartLightsVisible(false); setStartLightsGo(false); }, 4900),
       ];
       prevRacePhaseRef.current = raceState.racePhase;
@@ -2813,7 +2833,7 @@ export function LandingPage({
 
   const sections = ["How It Works", "Guide", "Features", "About"];
   const sectionKey = s => s.toLowerCase().replace(/\s+/g, "-");
-  const isRaceVisualActive = raceState.racePhase === "racing" || raceState.racePhase === "finished";
+  const isRaceVisualActive = raceState.racePhase === "racing" || raceState.racePhase === "cooldown" || raceState.racePhase === "finished";
 
   return (
     <div style={{ minHeight:"100vh", background:"#0d0d0d", fontFamily:"'Barlow Condensed',sans-serif", position:"relative", overflow:"hidden", height:"100vh" }}>
@@ -2869,10 +2889,66 @@ export function LandingPage({
             <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at top left, rgba(225,6,0,0.09), transparent 36%)", pointerEvents:"none" }} />
 
             <div style={{ position:"relative", width:"100%", height:"100%", zIndex:1 }}>
-              <TrackView raceState={raceState} playbackProgress={raceState.racePhase === "finished" ? 1 : playbackProgress} />
+              <TrackView raceState={raceState} lapDurationMs={1800 / raceSpeed} cooldownMs={COOLDOWN_MS} running={raceState.racePhase === "finished" || raceState.racePhase === "cooldown" || lightsOut} />
+
+              {/* Playback speed control — sits over the top-right of the track panel */}
+              {raceState.racePhase === "racing" && (
+                <div
+                  style={{
+                    position:"absolute",
+                    top:104,
+                    right:330,
+                    zIndex:9,
+                    display:"flex",
+                    alignItems:"center",
+                    gap:6,
+                    padding:"7px 9px",
+                    borderRadius:16,
+                    background:"rgba(6,8,12,0.78)",
+                    border:"1px solid rgba(255,255,255,0.1)",
+                    boxShadow:"0 10px 24px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  <span style={{
+                    fontFamily:"'Barlow Condensed',sans-serif",
+                    fontWeight:700, fontSize:9, letterSpacing:2,
+                    color:"rgba(255,255,255,0.42)", textTransform:"uppercase",
+                    marginRight:2,
+                  }}>
+                    Speed
+                  </span>
+                  {[0.25, 0.5, 1, 2, 4].map((s) => {
+                    const active = raceSpeed === s;
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setRaceSpeed(s)}
+                        style={{
+                          cursor:"pointer",
+                          minWidth:34,
+                          padding:"5px 8px",
+                          borderRadius:10,
+                          border:`1px solid ${active ? "#E10600" : "rgba(255,255,255,0.14)"}`,
+                          background: active ? "rgba(225,6,0,0.9)" : "rgba(255,255,255,0.04)",
+                          color: active ? "#fff" : "rgba(255,255,255,0.62)",
+                          fontFamily:"'Bebas Neue',sans-serif",
+                          fontSize:15, letterSpacing:0.5, lineHeight:1,
+                          transition:"all 0.18s ease",
+                        }}
+                      >
+                        {s}x
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Weather banner — light theme */}
-              {weatherBanner && raceState.racePhase === "racing" && (
+              {weatherBanner && raceState.racePhase === "racing" && (() => {
+                  const accent = weatherBanner.weather === "heavy_rain" ? "#2d7ef7"
+                    : weatherBanner.weather === "light_rain" ? "#43d17f"
+                    : "#f5a623";
+                  return (
                 <div
                   style={{
                     position:"absolute",
@@ -2880,26 +2956,41 @@ export function LandingPage({
                     left:"50%",
                     transform:"translateX(-50%)",
                     zIndex:9,
-                    padding:"13px 24px 12px",
+                    display:"flex",
+                    alignItems:"center",
+                    gap:16,
+                    padding:"13px 26px 13px 18px",
                     borderRadius:22,
-                    background:"linear-gradient(180deg, rgba(255,255,255,0.94) 0%, rgba(244,246,250,0.9) 100%)",
-                    border:`1px solid ${weatherBanner.weather === "heavy_rain" ? "rgba(45,126,247,0.28)" : weatherBanner.weather === "light_rain" ? "rgba(67,209,127,0.26)" : "rgba(0,0,0,0.1)"}`,
-                    boxShadow:"0 18px 44px rgba(0,0,0,0.13), inset 0 1px 0 rgba(255,255,255,0.95)",
+                    background:"linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(244,246,250,0.92) 100%)",
+                    border:`1px solid ${accent}44`,
+                    boxShadow:`0 18px 44px rgba(0,0,0,0.13), inset 0 1px 0 rgba(255,255,255,0.95), 0 0 0 4px ${accent}14`,
                     backdropFilter:"blur(20px)",
-                    textAlign:"center",
                     pointerEvents:"none",
-                    minWidth:260,
+                    minWidth:280,
                     animation:"weatherIn 0.45s cubic-bezier(0.22,1,0.36,1) both",
                   }}
                 >
-                  <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3.2, color:"#E10600", textTransform:"uppercase", marginBottom:5 }}>
-                    Race Control · Lap {weatherBanner.lap}
+                  <div style={{
+                    flexShrink:0,
+                    width:58, height:58,
+                    borderRadius:16,
+                    display:"flex", alignItems:"center", justifyContent:"center",
+                    background:`${accent}16`,
+                    border:`1px solid ${accent}33`,
+                  }}>
+                    <WeatherIcon weather={weatherBanner.weather} size={38} />
                   </div>
-                  <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, lineHeight:0.95, letterSpacing:1.4, color:"#111" }}>
-                    {weatherBanner.text}
+                  <div style={{ textAlign:"left" }}>
+                    <div style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3.2, color:"#E10600", textTransform:"uppercase", marginBottom:4 }}>
+                      Race Control · Lap {weatherBanner.lap}
+                    </div>
+                    <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:32, lineHeight:0.95, letterSpacing:1.4, color:"#111" }}>
+                      {weatherBanner.text}
+                    </div>
                   </div>
                 </div>
-              )}
+                  );
+                })()}
 
               <RaceHUD
                 raceState={raceState}
@@ -2967,40 +3058,66 @@ export function LandingPage({
                   alignItems:"center",
                   justifyContent:"center",
                   pointerEvents:"none",
-                  background:"linear-gradient(180deg, rgba(235,239,246,0.28) 0%, rgba(214,221,233,0.52) 48%, rgba(232,237,245,0.78) 100%)",
-                  backdropFilter:"blur(10px)",
+                  background:"rgba(241, 243, 246, 0.75)",
+                  backdropFilter:"blur(12px)",
                   animation:"fadeIn 0.3s ease",
                 }}>
                   <div style={{
                     position:"relative",
-                    width:"min(760px, calc(100vw - 56px))",
-                    padding:"34px 34px 30px",
-                    borderRadius:34,
-                    background:"linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(237,241,248,0.86) 100%)",
-                    border:"1px solid rgba(255,255,255,0.72)",
-                    boxShadow:"0 28px 72px rgba(15,22,34,0.16), inset 0 1px 0 rgba(255,255,255,0.98)",
+                    width:"min(720px, calc(100vw - 56px))",
+                    padding:"40px 40px 36px",
+                    borderRadius:30,
+                    background:"rgba(255, 255, 255, 0.96)",
+                    border:"1px solid rgba(17, 17, 17, 0.08)",
+                    boxShadow:"0 30px 80px rgba(0,0,0,0.12)",
+                    backdropFilter:"blur(20px)",
                     overflow:"hidden",
                     textAlign:"center",
                     animation:"raceScreenIn 0.55s cubic-bezier(0.22,1,0.36,1) both",
                   }}>
-                    <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg, rgba(255,255,255,0.48) 0%, transparent 34%, transparent 72%, rgba(225,6,0,0.05) 100%)", pointerEvents:"none" }} />
-                    <div style={{ position:"absolute", top:0, left:0, right:0, height:84, background:"repeating-linear-gradient(135deg, rgba(17,17,17,0.08) 0 14px, rgba(255,255,255,0) 14px 28px)", opacity:0.3 }} />
-                    <div style={{ display:"inline-flex", alignItems:"center", gap:10, padding:"8px 14px", borderRadius:999, background:"rgba(255,255,255,0.54)", border:"1px solid rgba(255,255,255,0.7)", position:"relative", zIndex:1 }}>
-                      <div style={{ width:18, height:18, background:"repeating-conic-gradient(from 45deg, #fff 0 25%, #111 0 50%)", backgroundSize:"12px 12px", borderRadius:4 }} />
-                      <span style={{ fontWeight:700, fontSize:10, letterSpacing:3, color:"#E10600", textTransform:"uppercase" }}>Session Complete</span>
+                    <div style={{ display:"inline-flex", alignItems:"center", gap:9, padding:"8px 14px", borderRadius:999, background:"rgba(17, 17, 17, 0.04)", border:"1px solid rgba(17, 17, 17, 0.08)", position:"relative", zIndex:1 }}>
+                      <div style={{ width:14, height:14, background:"repeating-conic-gradient(from 45deg, #fff 0 25%, #111 0 50%)", backgroundSize:"10px 10px", borderRadius:3 }} />
+                      <span style={{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:700, fontSize:10, letterSpacing:3, color:"var(--f1-red)", textTransform:"uppercase" }}>Session Complete</span>
                     </div>
-                    <div style={{ position:"relative", zIndex:1, fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(72px,10vw,136px)", lineHeight:0.86, letterSpacing:"0.05em", color:"#111", marginTop:18 }}>
-                      RACE ENDED
+                    <div style={{ position:"relative", zIndex:1, fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(64px,8.5vw,118px)", lineHeight:0.86, letterSpacing:"0.03em", color:"#111", marginTop:20 }}>
+                      CHECKERED FLAG
                     </div>
-                    <div style={{ position:"relative", zIndex:1, marginTop:12, fontWeight:600, fontSize:14, letterSpacing:3, color:"rgba(17,17,17,0.5)", textTransform:"uppercase" }}>
-                      Checkered flag • {raceState.totalLaps} laps complete • Results incoming
+                    <div style={{ position:"relative", zIndex:1, marginTop:14, fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:13, letterSpacing:3, color:"rgba(17, 17, 17, 0.58)", textTransform:"uppercase" }}>
+                      {raceState.totalLaps} laps complete · results incoming
                     </div>
-                    <div style={{ position:"relative", zIndex:1, display:"flex", justifyContent:"center", gap:10, marginTop:22, flexWrap:"wrap" }}>
-                      {["Race Control", finishWinnerLabel, "Broadcast Feed Locked"].map((item) => (
-                        <div key={item} style={{ padding:"10px 14px", borderRadius:999, background:"rgba(255,255,255,0.48)", border:"1px solid rgba(255,255,255,0.68)", color:"rgba(17,17,17,0.68)", fontWeight:700, fontSize:11, letterSpacing:2, textTransform:"uppercase" }}>
-                          {item}
+                    <div style={{ position:"relative", zIndex:1, display:"flex", justifyContent:"center", gap:12, marginTop:24, flexWrap:"wrap" }}>
+                      {finishWinner && (
+                        <div style={{
+                          padding:"9px 16px",
+                          borderRadius:999,
+                          background:"rgba(17, 17, 17, 0.04)",
+                          border:`1px solid ${TEAMS[finishWinner.team]?.color || "var(--f1-red)"}`,
+                          color:"#111",
+                          fontFamily:"'Barlow Condensed',sans-serif",
+                          fontWeight:700,
+                          fontSize:12,
+                          letterSpacing:2,
+                          textTransform:"uppercase",
+                          boxShadow:`inset 0 0 12px ${TEAMS[finishWinner.team]?.color || "var(--f1-red)"}10`
+                        }}>
+                          <span style={{ color: TEAMS[finishWinner.team]?.color || "var(--f1-red)", marginRight: 6 }}>🏁</span>
+                          {finishWinnerLabel}
                         </div>
-                      ))}
+                      )}
+                      <div style={{
+                        padding:"9px 16px",
+                        borderRadius:999,
+                        background:"rgba(17, 17, 17, 0.04)",
+                        border:"1px solid rgba(17, 17, 17, 0.08)",
+                        color:"rgba(17, 17, 17, 0.78)",
+                        fontFamily:"'Barlow Condensed',sans-serif",
+                        fontWeight:700,
+                        fontSize:12,
+                        letterSpacing:2,
+                        textTransform:"uppercase"
+                      }}>
+                        Spa-Francorchamps
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -3016,27 +3133,16 @@ export function LandingPage({
               position:"absolute",
               inset:0,
               animation:"fadeIn 0.4s ease",
-              background: `#0d0d0d url(${pitGarageSrc}) center center / cover no-repeat`,
+              background: `#f3f5f9 url(${landingImageSrc}) center center / cover no-repeat`,
               transformOrigin:"center",
             }}
           >
-            <div style={{ position:"absolute", inset:0, backdropFilter:"blur(2.5px)", background:"rgba(255,255,255,0.03)", pointerEvents:"none" }} />
-            <div style={{ position:"absolute", inset:-20, background:`url(${pitGarageSrc}) center center / cover no-repeat`, animation:"heroDrift 14s ease-in-out infinite", opacity:0.24, mixBlendMode:"soft-light", filter:"blur(5px)", pointerEvents:"none" }} />
             <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at 50% 42%, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.05) 22%, transparent 52%)", animation:"heroGlow 7s ease-in-out infinite", pointerEvents:"none" }} />
-            <div style={{ position:"absolute", top:0, bottom:0, width:"24%", background:"linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%)", filter:"blur(20px)", animation:"heroSweep 7.5s ease-in-out infinite", pointerEvents:"none" }} />
             <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(rgba(255,255,255,0.14) 0.8px, transparent 0.8px)", backgroundSize:"18px 18px", opacity:0.16, mixBlendMode:"soft-light", pointerEvents:"none" }} />
             <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 32%, transparent 70%, rgba(225,6,0,0.05) 100%)", pointerEvents:"none" }} />
             {/* Overlays */}
             <div style={{ position:"absolute", inset:0, background:"linear-gradient(to bottom, rgba(255,255,255,0.08) 0%, transparent 18%, transparent 58%, rgba(0,0,0,0.64) 100%)", pointerEvents:"none" }} />
             <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at center, transparent 28%, rgba(0,0,0,0.12) 72%, rgba(0,0,0,0.36) 100%)", pointerEvents:"none" }} />
-
-            <div style={{ position:"absolute", left:"50%", top:"44%", transform:"translate(-50%, -50%)", textAlign:"center", zIndex:2, pointerEvents:"none", animation:"heroTitleIn 0.85s ease both" }}>
-              <div style={{ position:"relative", display:"inline-block", padding:"20px 34px 18px", borderRadius:26, background:"linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%)", border:"1px solid rgba(255,255,255,0.2)", backdropFilter:"blur(14px)", boxShadow:"0 18px 44px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.18)" }}>
-                <div style={{ position:"absolute", inset:0, borderRadius:26, background:"linear-gradient(135deg, rgba(255,255,255,0.14), transparent 42%, transparent 70%, rgba(225,6,0,0.06))", pointerEvents:"none" }} />
-                <div style={{ position:"absolute", left:16, right:16, top:9, height:1, background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.36), transparent)", pointerEvents:"none" }} />
-                <div style={{ position:"absolute", left:18, right:18, bottom:9, height:1, background:"linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent)", pointerEvents:"none" }} />
-              </div>
-            </div>
 
             <div style={{ position:"absolute", left:"100%", top:"58%", transform:"translateX(-50%)", display:"flex", gap:18, zIndex:3, animation:"fadeInUp 0.9s ease 0.18s both" }}>
               <div className="hero-action" onClick={() => setShowJoin(true)}>
@@ -3079,28 +3185,28 @@ export function LandingPage({
         {/* HOW IT WORKS */}
         {!isRaceVisualActive && activeSection === "how-it-works" && (
           <div className="section-panel" style={{ paddingTop:62 }}>
-            <HowItWorksSection onCreateRoom={handleOpenSetup} onShowJoin={() => setShowJoin(true)} />
+            <HowItWorksSection onCreateRoom={() => setShowCreate(true)} onShowJoin={() => setShowJoin(true)} />
           </div>
         )}
 
         {/* GUIDE */}
         {!isRaceVisualActive && activeSection === "guide" && (
           <div className="section-panel" style={{ paddingTop:62 }}>
-            <GuideSection onCreateRoom={handleOpenSetup} onShowJoin={() => setShowJoin(true)} />
+            <GuideSection onCreateRoom={() => setShowCreate(true)} onShowJoin={() => setShowJoin(true)} />
           </div>
         )}
 
         {/* FEATURES */}
         {!isRaceVisualActive && activeSection === "features" && (
           <div className="section-panel" style={{ paddingTop:62 }}>
-            <FeaturesSection onCreateRoom={handleOpenSetup} onShowJoin={() => setShowJoin(true)} />
+            <FeaturesSection onCreateRoom={() => setShowCreate(true)} onShowJoin={() => setShowJoin(true)} />
           </div>
         )}
 
         {/* ABOUT */}
         {!isRaceVisualActive && activeSection === "about" && (
           <div className="section-panel" style={{ paddingTop:62 }}>
-            <AboutSection onCreateRoom={handleOpenSetup} onShowJoin={() => setShowJoin(true)} />
+            <AboutSection onCreateRoom={() => setShowCreate(true)} onShowJoin={() => setShowJoin(true)} />
           </div>
         )}
       </div>
@@ -3229,16 +3335,16 @@ export function LandingPage({
       {screen === "lobby-room" && lobby && (
         <div style={{
           position:"fixed", inset:0, zIndex:300,
-          background:`linear-gradient(180deg, rgba(205,209,216,0.92) 0%, rgba(176,181,190,0.85) 100%), url(${pitGarageSrc}) center center / cover no-repeat`,
+          background:`linear-gradient(180deg, rgba(8, 10, 14, 0.96) 0%, rgba(16, 18, 22, 0.92) 100%), url(${pitGarageSrc}) center center / cover no-repeat`,
           display:"flex", flexDirection:"column",
           fontFamily:"'Barlow Condensed',sans-serif",
-          color:"#111",
+          color:"#fff",
           animation:"fadeIn 0.35s ease",
           overflow:"hidden",
         }}>
           {/* Grid overlay — matches section-shell::before */}
           <div style={{ position:"absolute", inset:0, pointerEvents:"none", zIndex:0,
-            background:"radial-gradient(circle at top left, rgba(225,6,0,0.12), transparent 32%), linear-gradient(90deg, rgba(255,255,255,0.52) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.42) 1px, transparent 1px)",
+            background:"radial-gradient(circle at top left, rgba(225,6,0,0.12), transparent 32%), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px)",
             backgroundSize:"auto, 56px 56px, 56px 56px",
           }} />
 
@@ -3247,8 +3353,8 @@ export function LandingPage({
             position:"relative", zIndex:10, flexShrink:0,
             height:86, display:"flex", alignItems:"center", justifyContent:"space-between",
             padding:"0 34px", margin:"18px 22px 0", borderRadius:24,
-            background:"linear-gradient(180deg, rgba(145,151,162,0.7) 0%, rgba(90,96,107,0.46) 100%)",
-            border:"1px solid rgba(255,255,255,0.2)",
+            background:"rgba(22, 24, 30, 0.82)",
+            border:"1px solid rgba(255,255,255,0.08)",
             boxShadow:"0 18px 48px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
             backdropFilter:"blur(22px)",
           }}>
@@ -3271,21 +3377,21 @@ export function LandingPage({
 
               {/* Lobby title */}
               <div style={{ animation:"panelIn 0.4s ease" }}>
-                <div style={{ fontWeight:600, fontSize:11, letterSpacing:3.5, color:"#E10600", marginBottom:6 }}>LOBBY</div>
-                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(44px,5vw,76px)", color:"#111", letterSpacing:"0.02em", lineHeight:0.95 }}>{lobby.name}</div>
-                <div style={{ marginTop:12, height:2, width:56, background:"#E10600", borderRadius:1 }} />
+                <div style={{ fontWeight:600, fontSize:11, letterSpacing:3.5, color:"var(--f1-red)", marginBottom:6 }}>LOBBY</div>
+                <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:"clamp(44px,5vw,76px)", color:"#fff", letterSpacing:"0.02em", lineHeight:0.95 }}>{lobby.name}</div>
+                <div style={{ marginTop:12, height:2, width:56, background:"var(--f1-red)", borderRadius:1 }} />
               </div>
 
               {/* Players glass panel */}
               <div style={{
-                background:"linear-gradient(180deg, rgba(186,191,200,0.9) 0%, rgba(157,163,173,0.8) 100%)",
-                border:"1px solid rgba(255,255,255,0.22)",
+                background:"rgba(22, 24, 30, 0.82)",
+                border:"1px solid rgba(255,255,255,0.08)",
                 borderRadius:26, backdropFilter:"blur(22px)",
-                boxShadow:"0 28px 72px rgba(0,0,0,0.16)",
+                boxShadow:"0 28px 72px rgba(0,0,0,0.35)",
                 padding:"30px 32px",
                 animation:"panelIn 0.45s ease 0.05s both",
               }}>
-                <div style={{ fontWeight:600, fontSize:10, letterSpacing:3.5, color:"rgba(17,17,17,0.45)", marginBottom:18, textTransform:"uppercase" }}>
+                <div style={{ fontWeight:600, fontSize:10, letterSpacing:3.5, color:"rgba(255,255,255,0.46)", marginBottom:18, textTransform:"uppercase" }}>
                   Drivers on Grid — {lobby.players.length}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -3293,33 +3399,33 @@ export function LandingPage({
                     <div key={i} style={{
                       display:"flex", alignItems:"center", gap:16,
                       padding:"15px 20px",
-                      background:"rgba(255,255,255,0.44)",
-                      border:"1px solid rgba(255,255,255,0.4)",
+                      background:"rgba(255,255,255,0.04)",
+                      border:"1px solid rgba(255,255,255,0.08)",
                       borderRadius:16,
-                      boxShadow:"0 4px 18px rgba(0,0,0,0.06)",
+                      boxShadow:"0 4px 18px rgba(0,0,0,0.1)",
                       transition:"transform 0.15s",
                     }}>
                       {/* Avatar */}
                       <div style={{
                         width:42, height:42, borderRadius:"50%", flexShrink:0,
-                        background: p.isHost ? "linear-gradient(135deg,#E10600,#ff4422)" : "linear-gradient(135deg,rgba(100,104,115,0.3),rgba(80,84,95,0.2))",
+                        background: p.isHost ? "linear-gradient(135deg,var(--f1-red),#ff4422)" : "linear-gradient(135deg,rgba(100,104,115,0.3),rgba(80,84,95,0.2))",
                         display:"flex", alignItems:"center", justifyContent:"center",
                         fontFamily:"'Bebas Neue',sans-serif", fontSize:17,
-                        color: p.isHost ? "#fff" : "#111",
+                        color: "#fff",
                         boxShadow: p.isHost ? "0 4px 14px rgba(225,6,0,0.28)" : "none",
-                        border:"1.5px solid rgba(255,255,255,0.5)",
+                        border:"1.5px solid rgba(255,255,255,0.15)",
                       }}>
                         {p.username.charAt(0).toUpperCase()}
                       </div>
                       {/* Name + role */}
                       <div style={{ flex:1 }}>
-                        <div style={{ fontWeight:700, fontSize:18, color:"#111", letterSpacing:1.5, textTransform:"uppercase", lineHeight:1 }}>{p.username}</div>
-                        <div style={{ fontSize:10, letterSpacing:3, marginTop:3, color: p.isHost ? "#E10600" : "rgba(17,17,17,0.38)", fontWeight:600 }}>
+                        <div style={{ fontWeight:700, fontSize:18, color:"#fff", letterSpacing:1.5, textTransform:"uppercase", lineHeight:1 }}>{p.username}</div>
+                        <div style={{ fontSize:10, letterSpacing:3, marginTop:3, color: p.isHost ? "var(--f1-red)" : "rgba(255,255,255,0.46)", fontWeight:600 }}>
                           {p.isHost ? "HOST" : "DRIVER"}
                         </div>
                       </div>
                       {/* Position number */}
-                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, letterSpacing:1, color:"rgba(17,17,17,0.18)", lineHeight:1 }}>P{i + 1}</div>
+                      <div style={{ fontFamily:"'Bebas Neue',sans-serif", fontSize:22, letterSpacing:1, color:"rgba(255,255,255,0.2)", lineHeight:1 }}>P{i + 1}</div>
                     </div>
                   ))}
                 </div>
@@ -3330,7 +3436,7 @@ export function LandingPage({
                 onClick={handleStartSetup}
                 style={{
                   width:"100%", padding:"18px", borderRadius:16, border:"none",
-                  background:"linear-gradient(135deg, #E10600, #c00400)",
+                  background:"var(--f1-red)",
                   color:"#fff", fontFamily:"'Bebas Neue',sans-serif", fontSize:26,
                   letterSpacing:3, cursor:"pointer", transition:"transform 0.15s, box-shadow 0.15s",
                   boxShadow:"0 8px 28px rgba(225,6,0,0.3)",

@@ -115,11 +115,26 @@ const WEATHER_TYRE_PEN = {
   heavy_rain: { S: 5, M: 5, H: 5, I: 2, W: 0 },
 };
 
-export function updateWeather(raceState) {
-  const lap = raceState.currentLap;
-  let weather = "dry";
-  if (lap >= 26) weather = "heavy_rain";
-  else if (lap >= 16) weather = "light_rain";
+// Stochastic weather: mostly dry, occasional rain that can build or clear.
+// `weatherBias` (set from the chosen weather strategy) scales how likely rain
+// is to appear — 1 = dry forecast (rare), higher = wetter forecast.
+export function updateWeather(raceState, rand = Math.random) {
+  const current = raceState.weather || "dry";
+  const lap = (raceState.currentLap || 0) + 1;
+  const bias = raceState.weatherBias ?? 1;
+  const roll = rand();
+  let weather = current;
+
+  if (current === "dry") {
+    // Low base chance per lap; no rain in the opening laps so the start settles.
+    if (lap > 3 && roll < 0.008 * bias) weather = "light_rain";
+  } else if (current === "light_rain") {
+    if (roll < 0.13) weather = "dry";              // clears up
+    else if (roll > 0.93) weather = "heavy_rain";  // intensifies
+  } else if (current === "heavy_rain") {
+    if (roll < 0.18) weather = "light_rain";        // eases off
+  }
+
   return { ...raceState, weather };
 }
 
@@ -389,7 +404,7 @@ export function simulateRaceTick(raceState) {
   const events = [...raceState.events];
 
   // 1. Weather
-  const ws = updateWeather(raceState);
+  const ws = updateWeather(raceState, rand);
   if (raceState.weather !== ws.weather)
     events.push({ type: "weather_change", from: raceState.weather, to: ws.weather, lap, timestamp: events.length });
 

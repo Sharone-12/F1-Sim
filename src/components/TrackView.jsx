@@ -78,18 +78,44 @@ function deriveSpeed(lapTime) {
   return Math.round((7.004 / lapTime) * 3600);
 }
 
-function TrackViewInner({ raceState, playbackProgress = 0 }) {
+function TrackViewInner({ raceState, lapDurationMs = 1800, cooldownMs = 2600, running = true }) {
   const pathRef = useRef(null);
   const pathLenRef = useRef(0);
   const [pathReady, setPathReady] = useState(false);
   const smoothedRef = useRef({});
   const carGroupRefs = useRef({});
   const raceStateRef = useRef(raceState);
-  const progressRef = useRef(playbackProgress);
+  const lapDurationRef = useRef(lapDurationMs);
+  const cooldownRef = useRef(cooldownMs);
+  const runningRef = useRef(running);
+  // Wall-clock timestamp at which the current lap began — drives the 0→1 sweep
+  // internally so we don't depend on a prop blocked by this component's memo.
+  const lapStartRef = useRef(performance.now());
+  const lapNumberRef = useRef(raceState.currentLap);
+  const cooldownStartRef = useRef(0);
+  const phaseRef = useRef(raceState.racePhase);
 
   // Keep refs in sync — no re-renders triggered
   raceStateRef.current = raceState;
-  progressRef.current = playbackProgress;
+  lapDurationRef.current = lapDurationMs;
+  cooldownRef.current = cooldownMs;
+
+  // Restart the sweep when the lights go out, or whenever the sim advances a lap.
+  if (running && !runningRef.current) {
+    lapStartRef.current = performance.now();
+  }
+  runningRef.current = running;
+
+  if (raceState.currentLap !== lapNumberRef.current) {
+    lapNumberRef.current = raceState.currentLap;
+    lapStartRef.current = performance.now();
+  }
+
+  // Stamp the moment the cooldown begins so trailing cars can run to the line.
+  if (raceState.racePhase === "cooldown" && phaseRef.current !== "cooldown") {
+    cooldownStartRef.current = performance.now();
+  }
+  phaseRef.current = raceState.racePhase;
 
   const setCarRef = useCallback((id, el) => {
     if (el) carGroupRefs.current[id] = el;
@@ -113,37 +139,72 @@ function TrackViewInner({ raceState, playbackProgress = 0 }) {
 
     const animate = () => {
       const state = raceStateRef.current;
-      const progress = progressRef.current;
+      const phase = state.racePhase;
       const len = pathLenRef.current;
       const smoothed = smoothedRef.current;
       const players = state.players;
+      const finishLaps = state.totalLaps;
+
+      const now = performance.now();
+      const racingProgress = !runningRef.current
+        ? 0
+        : clamp((now - lapStartRef.current) / lapDurationRef.current, 0, 1);
+      // How far through the post-leader cooldown we are (0→1).
+      const coolFrac = phase === "finished"
+        ? 1
+        : phase === "cooldown"
+          ? clamp((now - cooldownStartRef.current) / cooldownRef.current, 0, 1)
+          : 0;
 
       const leaderTime = players.reduce(
         (lowest, p) => Math.min(lowest, p.totalTime),
         Number.POSITIVE_INFINITY,
       );
 
+      // Largest gap (in laps) — the backmarker reaches the line at coolFrac = 1.
+      let maxLapGap = 0;
+      if (phase === "cooldown" || phase === "finished") {
+        for (const p of players) {
+          const lt = p.currentLapTime > 0 ? p.currentLapTime : 90;
+          const g = (p.totalTime - leaderTime) / lt;
+          if (g > maxLapGap) maxLapGap = g;
+        }
+      }
+
       for (let i = 0; i < players.length; i++) {
         const player = players[i];
-        const paceFactor =
-          player.currentLapTime > 0
-            ? clamp(
-                (players[0]?.currentLapTime ?? player.currentLapTime) / player.currentLapTime,
-                0.84, 1.08,
-              )
-            : 1;
-        const intraLapProgress = clamp(progress * paceFactor, 0, 0.999);
-        const timeGap = player.totalTime - leaderTime;
-        const lapGap = player.currentLapTime > 0 ? timeGap / player.currentLapTime : 0;
-        const lapProgress = clamp(state.currentLap + intraLapProgress - lapGap, 0, state.totalLaps);
-        // Use fractional part so each lap = one full circuit around the track
-        const intraLap = ((lapProgress % 1) + 1) % 1;
-        const targetDistance = wrapDistance(intraLap * len, len);
 
-        const current = smoothed[player.id] ?? targetDistance;
-        const delta = shortestDistanceDelta(current, targetDistance, len);
-        const step = Math.abs(delta) < 0.5 ? delta : delta * 0.12;
-        const distance = wrapDistance(current + step, len);
+        // Continuous lap progress: the leader advances currentLap + (0→1) across
+        // the tick; everyone else is offset backwards by their time gap expressed
+        // in laps. This makes ONE lap = ONE full circuit, and the value increases
+        // smoothly across tick boundaries (currentLap+1 picks up where progress
+        // left off).
+        const lapTime = player.currentLapTime > 0 ? player.currentLapTime : 90;
+        const lapGap = (player.totalTime - leaderTime) / lapTime;
+
+        let cumulativeLaps;
+        if (phase === "cooldown" || phase === "finished") {
+          // Drive every car forward to the finish line (clamped), so the whole
+          // field crosses the line before results show — leader first.
+          cumulativeLaps = Math.min(finishLaps, finishLaps + coolFrac * maxLapGap - lapGap);
+        } else {
+          cumulativeLaps = state.currentLap + racingProgress - lapGap;
+        }
+        const frac = ((cumulativeLaps % 1) + 1) % 1;
+
+        // The SVG path is drawn anti-clockwise; reverse it so cars run clockwise.
+        const targetDistance = wrapDistance((1 - frac) * len, len);
+
+        // Light smoothing only to absorb discrete jumps (gap changes, pit stops,
+        // overtakes) without lagging the main forward sweep.
+        const current = smoothed[player.id];
+        let distance;
+        if (current == null) {
+          distance = targetDistance;
+        } else {
+          const delta = shortestDistanceDelta(current, targetDistance, len);
+          distance = wrapDistance(current + delta * 0.5, len);
+        }
         smoothed[player.id] = distance;
 
         const el = carGroupRefs.current[player.id];
@@ -437,7 +498,10 @@ function TrackViewInner({ raceState, playbackProgress = 0 }) {
 }
 
 export default memo(TrackViewInner, (prev, next) => {
-  // Only re-render when raceState changes (tick boundaries).
-  // playbackProgress is consumed via ref — no re-render needed.
-  return prev.raceState === next.raceState;
+  // Re-render on tick boundaries (raceState) or when playback speed changes.
+  // Per-frame progress is computed internally in the rAF loop.
+  return prev.raceState === next.raceState
+    && prev.lapDurationMs === next.lapDurationMs
+    && prev.cooldownMs === next.cooldownMs
+    && prev.running === next.running;
 });

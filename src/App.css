@@ -6,10 +6,12 @@
 }
 
 :root {
-  --primary-red: #E8002D;
+  --primary-red: #E10600;
   --accent-gold: #FFD700;
   --dark-bg: #0a0e27;
   --light-text: #ffffff;
+  --f1-red: #E10600;
+  --f1-red-hover: #c00400;
 }
 
 body {
@@ -34,6 +36,16 @@ h1 {
 h2 {
   font-size: 2rem;
   color: var(--accent-gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-delay: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 

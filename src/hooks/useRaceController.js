@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { simulateRaceTick } from "../simulation/raceEngine";
 
-const RACE_TICK_MS = 1800;
+// Base duration of a single lap of playback at 1x speed.
+const BASE_TICK_MS = 1800;
 
-export function useRaceController(raceState, setRaceState) {
+export function useRaceController(raceState, setRaceState, speed = 1, running = true) {
   const [playbackProgress, setPlaybackProgress] = useState(0);
   const tickStartRef = useRef(0);
+
+  // Effective lap duration — higher speed = shorter lap.
+  const tickMs = BASE_TICK_MS / (speed > 0 ? speed : 1);
 
   useEffect(() => {
     if (raceState.racePhase === "finished") {
@@ -19,6 +23,11 @@ export function useRaceController(raceState, setRaceState) {
       return undefined;
     }
 
+    // Restart the sweep at the beginning of every lap so each lap drives the
+    // car through one full circuit (0 → 1), instead of pinning at 1.
+    tickStartRef.current = 0;
+    setPlaybackProgress(0);
+
     let frameId;
 
     const animate = (timestamp) => {
@@ -27,24 +36,31 @@ export function useRaceController(raceState, setRaceState) {
       }
 
       const elapsed = timestamp - tickStartRef.current;
-      setPlaybackProgress(Math.min(elapsed / RACE_TICK_MS, 1));
+      setPlaybackProgress(Math.min(elapsed / tickMs, 1));
       frameId = window.requestAnimationFrame(animate);
     };
 
     frameId = window.requestAnimationFrame(animate);
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [raceState.racePhase, raceState.currentLap]);
+  }, [raceState.racePhase, raceState.currentLap, tickMs]);
 
   useEffect(() => {
     if (raceState.racePhase !== "racing") {
       return undefined;
     }
 
+    // Hold the grid until the lights go out.
+    if (!running) {
+      return undefined;
+    }
+
     if (raceState.currentLap >= raceState.totalLaps) {
+      // Leader has completed all laps — hand off to the cooldown phase so the
+      // rest of the field can finish before results are shown.
       setRaceState((previousState) => (
         previousState.racePhase === "racing"
-          ? { ...previousState, racePhase: "finished" }
+          ? { ...previousState, racePhase: "cooldown" }
           : previousState
       ));
       return undefined;
@@ -61,16 +77,16 @@ export function useRaceController(raceState, setRaceState) {
         if (nextRaceState.currentLap >= nextRaceState.totalLaps) {
           return {
             ...nextRaceState,
-            racePhase: "finished",
+            racePhase: "cooldown",
           };
         }
 
         return nextRaceState;
       });
-    }, RACE_TICK_MS);
+    }, tickMs);
 
     return () => window.clearTimeout(timerId);
-  }, [raceState.racePhase, raceState.currentLap, raceState.totalLaps, setRaceState]);
+  }, [raceState.racePhase, raceState.currentLap, raceState.totalLaps, tickMs, running, setRaceState]);
 
   return {
     playbackProgress,
