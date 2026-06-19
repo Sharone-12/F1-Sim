@@ -1,4 +1,4 @@
-# 🏎️ F1 Race Simulator
+# F1 Race Simulator
 
 A browser-based Formula 1 **race-strategy simulator**. Set up your car in the garage — tyres, fuel, aero, driving style, pit strategy — then watch a deterministic, physics-flavoured race play out lap-by-lap against a grid of AI drivers on a live animated track map.
 
@@ -6,7 +6,7 @@ Outcomes are a direct consequence of your decisions: pick the wrong compound, mi
 
 ---
 
-## ✨ Features
+## Features
 
 - **Garage setup** — choose tyre compound, fuel load, downforce / suspension / ride-height, driving style, ERS mode, and pit strategy.
 - **Live track view** — an animated SVG of Spa-Francorchamps where each car completes one full clockwise circuit per lap, spaced by real time gaps, with sector colours and turn markers.
@@ -21,7 +21,7 @@ Outcomes are a direct consequence of your decisions: pick the wrong compound, mi
 
 ---
 
-## 🧱 Tech Stack
+## Tech Stack
 
 | Layer | Tech |
 |-------|------|
@@ -32,7 +32,7 @@ Outcomes are a direct consequence of your decisions: pick the wrong compound, mi
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 f1-race-simulator/
@@ -46,7 +46,7 @@ f1-race-simulator/
 │   │                          #   race screen, results (the main UI)
 │   ├── constants/index.js     # Teams, drivers, circuits, compounds
 │   ├── simulation/
-│   │   └── raceEngine.js       # ⭐ The deterministic race engine
+│   │   └── raceEngine.js       # The deterministic race engine
 │   ├── hooks/
 │   │   ├── useRaceController.js # Drives lap ticks + playback timing
 │   │   └── usePitSystem.js      # Pit / fuel / ERS commands
@@ -63,7 +63,7 @@ f1-race-simulator/
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Frontend (the simulator)
 
@@ -91,7 +91,7 @@ The Vite dev server proxies `/api` → `http://localhost:8000`.
 
 ---
 
-## 🎮 How to Play
+## How to Play
 
 1. **Create a room** (lobby name + password + username) or **join** an existing one.
 2. **Start setup** to enter the garage and configure your car.
@@ -104,7 +104,7 @@ The Vite dev server proxies `/api` → `http://localhost:8000`.
 
 ---
 
-## 🧠 How the Simulation Works
+## How the Simulation Works
 
 The engine ([`src/simulation/raceEngine.js`](src/simulation/raceEngine.js)) advances the race **one lap per tick**. Every tick it computes each car's lap time, accumulates total race time, recalculates positions from cumulative time, then resolves overtakes, incidents, and pit stops. A **seeded PRNG** (re-seeded per lap from `rngSeed + lap`) keeps each race reproducible while differing between races.
 
@@ -155,7 +155,7 @@ Stochastic and **mostly dry**. Each lap there's a small (forecast-biased) chance
 
 ---
 
-## 🛰️ Backend API (FastF1)
+## Backend API (FastF1)
 
 The optional FastAPI service wraps [FastF1](https://docs.fastf1.dev/) to serve real historical F1 data:
 
@@ -171,6 +171,6 @@ The optional FastAPI service wraps [FastF1](https://docs.fastf1.dev/) to serve r
 
 ---
 
-## 📜 License
+## License
 
 ISC
