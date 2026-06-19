@@ -28,7 +28,7 @@ Outcomes are a direct consequence of your decisions: pick the wrong compound, mi
 | Frontend | React 19, Vite |
 | Simulation | Plain JS (deterministic engine, seeded PRNG) |
 | Rendering | Inline SVG + `requestAnimationFrame` |
-| Backend (optional) | Python, FastAPI, [FastF1](https://docs.fastf1.dev/) |
+| Backend (data API) | Python, FastAPI, [FastF1](https://docs.fastf1.dev/) |
 
 ---
 
@@ -53,7 +53,7 @@ f1-race-simulator/
 │   └── components/
 │       ├── TrackView.jsx       # Animated SVG track + car positions
 │       └── RaceHUD.jsx         # Live timing, controls, leaderboard
-└── backend/                   # Optional FastF1 data API (FastAPI)
+└── backend/                   # FastF1 data API (FastAPI)
     ├── main.py
     └── routers/               # sessions, drivers, race, telemetry,
                                #   strategy, simulate
@@ -79,7 +79,7 @@ npm run build
 npm run preview
 ```
 
-### Backend (optional — real F1 data API)
+### Backend (real F1 data API)
 
 ```bash
 cd backend
@@ -157,7 +157,7 @@ Stochastic and **mostly dry**. Each lap there's a small (forecast-biased) chance
 
 ## Backend API (FastF1)
 
-The optional FastAPI service wraps [FastF1](https://docs.fastf1.dev/) to serve real historical F1 data:
+The FastAPI service wraps [FastF1](https://docs.fastf1.dev/) to serve real historical F1 data:
 
 | Route | Purpose |
 |-------|---------|
